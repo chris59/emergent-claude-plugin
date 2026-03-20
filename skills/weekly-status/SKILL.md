@@ -65,21 +65,44 @@ Also calculate `PROJECT_START_DATE` from the first git commit: `git log --revers
 
 Calculate `PROJECT_WEEKS` = (today - PROJECT_START_DATE) / 7.
 
-### Step 2: Establish the Active Epic Scope
+### Step 2: Establish the Team Scope
 
-**CRITICAL**: ALL data in this report must be scoped to stories under the active Epics only. ADO projects often contain legacy/closed Epics from earlier phases — including their stories would inflate every metric.
+**CRITICAL**: ALL data in this report must be scoped to the **team's backlog**, not the entire ADO project. ADO projects often contain multiple teams, legacy epics, and work items from other groups.
 
-First, get the active Epic list. Query Epics in active states:
+**How to scope correctly**: Use the ADO Team APIs to discover the team and its area path.
+
+#### Step 2a: Get the Team ID
+
 ```bash
-az boards query --wiql "SELECT [System.Id], [System.Title], [System.State] FROM WorkItems WHERE [System.WorkItemType] = 'Epic' AND [System.State] NOT IN ('Closed', 'Removed', 'Unapproved / Future') ORDER BY [Microsoft.VSTS.Common.BacklogPriority]" --output json
+curl -s -u ":{ADO_TOKEN}" "{ADO_ORG}/_apis/projects/{ADO_PROJECT_ENCODED}/teams?api-version=7.0"
 ```
 
-If `.claude/project.team.md` contains an "Active Epics" list, use that instead — it's the user's curated view.
+Pick the team that matches the project's development team (not "Stakeholders" or other non-dev teams). If there's only one non-stakeholder team, use that.
 
-Save the list of active Epic IDs. Then build the full story-to-epic mapping:
-1. For each active Epic, fetch child Features via `$expand=relations`
+#### Step 2b: Get the Team's Area Path
+
+```bash
+curl -s -u ":{ADO_TOKEN}" "{ADO_ORG}/{ADO_PROJECT_ENCODED}/{TEAM_ID}/_apis/work/teamsettings/teamfieldvalues?api-version=7.0"
+```
+
+Extract `defaultValue` — this is the area path that scopes the team's backlog (e.g., `"Honda AIM"`).
+
+#### Step 2c: Get Team Epics
+
+Use the team backlog API to get exactly the epics the team sees:
+```bash
+curl -s -u ":{ADO_TOKEN}" "{ADO_ORG}/{ADO_PROJECT_ENCODED}/{TEAM_ID}/_apis/work/backlogs/Microsoft.EpicCategory/workItems?api-version=7.0"
+```
+
+This returns only the epics visible in the team's backlog view — no legacy or cross-team items.
+
+#### Step 2d: Build the Full Story-to-Epic Mapping
+
+1. For each team epic, fetch child Features via `$expand=relations`
 2. For each Feature, fetch child Stories via `$expand=relations`
-3. Build a set of **in-scope story IDs** — only stories that roll up to an active Epic
+3. Build a set of **in-scope story IDs** — only stories that roll up to a team epic
+
+**Additionally**, add `[System.AreaPath] = '{AREA_PATH}'` to ALL WIQL queries in subsequent steps. This ensures every query is team-scoped.
 
 **Every subsequent query in this report must filter to in-scope stories only.** This applies to:
 - Epic progress table
@@ -88,14 +111,14 @@ Save the list of active Epic IDs. Then build the full story-to-epic mapping:
 - Velocity calculations
 - PR list (only PRs linked to in-scope stories)
 
-### Step 3: Query Work Items (Scoped to Active Epics)
+### Step 3: Query Work Items (Team-Scoped)
 
-Get ALL stories under active Epics (for project totals and epic progress):
+Get ALL stories under the team's area path (for project totals and epic progress):
 ```bash
-az boards query --wiql "SELECT [System.Id], [System.Title], [System.WorkItemType], [System.State], [Microsoft.VSTS.Scheduling.StoryPoints], [System.AssignedTo], [System.ChangedDate] FROM WorkItems WHERE [System.WorkItemType] IN ('User Story', 'Bug') AND [System.State] <> 'Removed' ORDER BY [System.AssignedTo]" --output json
+az boards query --wiql "SELECT [System.Id], [System.Title], [System.WorkItemType], [System.State], [Microsoft.VSTS.Scheduling.StoryPoints], [System.AssignedTo], [System.ChangedDate] FROM WorkItems WHERE [System.WorkItemType] IN ('User Story', 'Bug') AND [System.State] <> 'Removed' AND [System.AreaPath] = '{AREA_PATH}' ORDER BY [System.AssignedTo]" --output json
 ```
 
-Then filter results to only in-scope story IDs (from Step 2).
+Then filter results to only in-scope story IDs (from Step 2) — this double-filters by area path AND epic hierarchy.
 
 From this filtered set, calculate:
 - **Epic progress**: done/total/% per Epic (all-time, not period-scoped)
@@ -105,7 +128,7 @@ From this filtered set, calculate:
 
 States that count as "done": Closed, Resolved, Dev Complete.
 
-**Developer filtering**: The developer list is dynamic — include anyone with activity. Read `.claude/project.team.md` for a "Developer Report Exclusions" list and remove excluded names. New developers appear automatically when they first contribute.
+**Developer filtering**: The developer list is fully dynamic — include anyone who is assigned to an in-scope story. Since all queries are already scoped to the team's area path and epic hierarchy, only team members will appear. No exclusion list needed — the area path filter handles this automatically. New developers appear the first time they are assigned a story in the team's backlog.
 
 ### Step 4: Query Pull Requests (Scoped)
 
