@@ -213,7 +213,7 @@ Write a JSON file with this structure:
     "branding": {
         "project_name": "{PROJECT_NAME}"
     },
-    "executive_summary": "2-3 sentence summary. Lead with the primary delivery theme, mention total points and stories delivered by the team, and note key milestones.",
+    "executive_summary": "Scale the executive summary to the period length. For a 2+ week period, write 2-3 substantial paragraphs that a manager can read INSTEAD of the full report. Cover: (1) Overall delivery stats and project completion %, (2) The 2-3 most important themes/capabilities delivered and why they matter to the business, (3) Key risks, velocity trends, and what to expect next. A manager should be able to read only the executive summary and walk away with an accurate picture of project status. For a 1-week period, 3-4 sentences is sufficient.",
     "sections": [
         {
             "heading": "Epic: {Epic Name}",
