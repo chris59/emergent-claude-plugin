@@ -434,8 +434,8 @@ def _velocity_trend(period_vel: float, project_vel: float) -> str:
 
 def create_developer_stats_table(doc, devs: list, totals: dict, brand: dict):
     """Create a per-developer stats table with velocity and trend."""
-    cols = ["Developer", "Period Pts", "Pts/Wk", "Proj Pts", "Avg Pts/Wk", "PRs", "Trend"]
-    table = doc.add_table(rows=2 + len(devs), cols=7)
+    cols = ["Developer", "Period Pts", "Pts/Wk", "Proj Pts", "Avg Pts/Wk", "Period PRs", "PRs/Wk", "Proj PRs", "Trend"]
+    table = doc.add_table(rows=2 + len(devs), cols=9)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     _set_table_full_width(table)
     _remove_table_borders(table)
@@ -449,8 +449,11 @@ def create_developer_stats_table(doc, devs: list, totals: dict, brand: dict):
     for ri, dev in enumerate(devs):
         period_pts = dev.get("period_pts", 0)
         project_pts = dev.get("project_pts", 0)
+        period_prs = dev.get("period_prs", 0)
+        project_prs = dev.get("project_prs", 0)
         period_vel = round(period_pts / period_weeks, 1)
         project_vel = round(project_pts / proj_weeks, 1)
+        prs_wk = round(period_prs / period_weeks, 1)
         trend = _velocity_trend(period_vel, project_vel)
         values = [
             dev["name"],
@@ -458,7 +461,9 @@ def create_developer_stats_table(doc, devs: list, totals: dict, brand: dict):
             str(period_vel),
             str(project_pts),
             str(project_vel),
-            str(dev.get("period_prs", 0)),
+            str(period_prs),
+            str(prs_wk),
+            str(project_prs),
             trend,
         ]
         for ci, val in enumerate(values):
@@ -481,8 +486,11 @@ def create_developer_stats_table(doc, devs: list, totals: dict, brand: dict):
     total_row = len(devs) + 1
     period_total = totals.get("period_pts", 0)
     project_total = totals.get("project_pts", 0)
+    total_period_prs = totals.get("period_prs", 0)
+    total_project_prs = totals.get("project_prs", 0)
     total_period_vel = round(period_total / period_weeks, 1)
     total_project_vel = round(project_total / proj_weeks, 1)
+    total_prs_wk = round(total_period_prs / period_weeks, 1)
     total_trend = _velocity_trend(total_period_vel, total_project_vel)
     _style_totals_row(table, total_row, [
         "Team Total",
@@ -490,7 +498,9 @@ def create_developer_stats_table(doc, devs: list, totals: dict, brand: dict):
         str(total_period_vel),
         str(project_total),
         str(total_project_vel),
-        str(totals.get("period_prs", 0)),
+        str(total_period_prs),
+        str(total_prs_wk),
+        str(total_project_prs),
         total_trend,
     ], brand)
 
@@ -646,13 +656,19 @@ def generate_report(content: dict) -> str:
         doc.add_heading("Remaining Work", level=2)
         for item in content["remaining_work"]:
             doc.add_paragraph(item, style="List Bullet")
+        if content.get("remaining_work_footnote"):
+            p = doc.add_paragraph()
+            run = p.add_run(content["remaining_work_footnote"])
+            run.italic = True
+            run.font.size = Pt(9)
+            run.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
 
     # Velocity
     if content.get("velocity"):
         doc.add_heading("Velocity", level=1)
         create_velocity_table(doc, content["velocity"], brand)
         if content["velocity"].get("summary"):
-            doc.add_paragraph()
+            doc.add_heading("Summary", level=2)
             for item in content["velocity"]["summary"] if isinstance(content["velocity"]["summary"], list) else [content["velocity"]["summary"]]:
                 doc.add_paragraph(item, style="List Bullet")
 
@@ -662,8 +678,43 @@ def generate_report(content: dict) -> str:
         totals = content.get("developer_totals", {})
         create_developer_stats_table(doc, content["developer_stats"], totals, brand)
         if content.get("developer_summary"):
-            doc.add_paragraph()
+            doc.add_heading("Summary", level=2)
             for item in content["developer_summary"] if isinstance(content["developer_summary"], list) else [content["developer_summary"]]:
+                doc.add_paragraph(item, style="List Bullet")
+
+    # Code Quality & Technical Insights
+    if content.get("code_quality"):
+        cq = content["code_quality"]
+        doc.add_heading("Code Quality & Technical Insights", level=1)
+        # Summary table
+        tbl = doc.add_table(rows=2, cols=5)
+        tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+        headers = ["PRs Reviewed", "Clean Rate", "Critical", "Major", "Minor"]
+        values = [
+            str(cq.get("prs_reviewed", 0)),
+            f"{cq.get('clean_rate', 0)}%",
+            str(cq.get("critical", 0)),
+            str(cq.get("major", 0)),
+            str(cq.get("minor", 0))
+        ]
+        _remove_table_borders(tbl)
+        _style_header_row(tbl, headers, brand, right_align_from=2)
+        for i, v in enumerate(values):
+            cell = tbl.rows[1].cells[i]
+            set_cell_margins(cell, top=40, bottom=40, start=80, end=80)
+            p = cell.paragraphs[0]
+            if i >= 2:
+                p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            add_run(p, v, font_size=10, font_name=BODY_FONT)
+
+        if cq.get("summary"):
+            doc.add_heading("Summary", level=2)
+            for item in cq["summary"] if isinstance(cq["summary"], list) else [cq["summary"]]:
+                doc.add_paragraph(item, style="List Bullet")
+
+        if cq.get("notable"):
+            doc.add_heading("Notable Issues Addressed", level=2)
+            for item in cq["notable"]:
                 doc.add_paragraph(item, style="List Bullet")
 
     # Timeline / Schedule
