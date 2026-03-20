@@ -218,7 +218,7 @@ Write a JSON file with this structure:
         {
             "heading": "Epic: {Epic Name}",
             "items": [
-                "#{story_id}: {Title} ({N} pts) — Business-friendly description of what was delivered"
+                "3-4 sentence executive summary of what was accomplished in this epic during the period. Write for a manager who does not know the codebase. Focus on capabilities delivered, business impact, and progress toward the epic's goal. Do NOT list individual stories — summarize themes. Example: 'The allocation pipeline's multi-pass balancing workflow reached completion this period, enabling dealers to receive balanced allocation suggestions. Key work included distribution logic, parity validation against the legacy Excel model, and a new audit view for side-by-side comparison.'"
             ]
         }
     ],
@@ -259,19 +259,33 @@ Write a JSON file with this structure:
     "pull_requests": {
         "date_range_label": "M/D – M/D",
         "items": ["PR #NNN: Title (M/D)"]
-    }
+    },
+    "appendix_stories": [
+        {"id": 1279, "title": "Story title", "epic": "Epic Name", "developer": "Dev Name", "points": 8, "state": "Dev Complete"}
+    ]
 }
 ```
 
-**Writing guidelines:**
-- Every bullet must include the story ID (e.g., `#1128: Forecast Submission Tab`)
-- Group sections by Epic name
+**Output filename**: Must include the period dates. Format: `{PROJECT_NAME} - Status Update {start_date} to {end_date}.docx`. Example: `Honda AIM - Status Update 2026-03-06 to 2026-03-20.docx`.
+```
+
+**Writing guidelines for Key Achievements (sections):**
+- Group by Epic. Each epic gets a 2-3 sentence summary paragraph followed by 3-5 notable story callouts
+- The summary paragraph explains the THEME — what capability was advanced and why it matters
+- Then list the 3-5 most significant stories with IDs and one-line descriptions
+- Small bug fixes, config changes, and <2pt stories go in the appendix only — don't clutter the main section
+- If an epic had 15 stories this period, surface the top 5 and say "plus N additional items (see Appendix)"
 - Executive summary: 2-3 sentences, lead with primary delivery, mention total team output
 - Use en-dashes (–) for ranges
 - Remaining work: explain what's left per epic, call out blocked items and QA items
 - Velocity summary: explain the trend, anticipate future direction
 - Developer summary: explain workload distribution, note role differences
 - All numbers must be verified against ADO — never guess
+
+**Appendix tables:**
+- **Appendix A: Completed Stories** — Table with columns: Story ID, Title, Epic, Developer, Points, State. ALL period stories go here.
+- **Appendix B: Pull Requests** — Table with columns: PR #, Title, Developer, Date. ALL period PRs go here.
+- Appendices are reference material — the reader should be able to skim the main report and only dive into appendices for details.
 
 ### Step 8: Generate the Document
 
@@ -288,18 +302,20 @@ Tell the user:
 
 ## Report Sections (in order)
 
-1. **Header** — Project name, "Weekly Status Update", date range, thin accent line
+1. **Header** — Project name, "Status Update", date range, thin accent line
 2. **Executive Summary** — 2-3 sentence overview
-3. **Key Achievements** — Grouped by Epic, each bullet has story ID + business description
+3. **Key Achievements** — Grouped by Epic: summary paragraph + top 3-5 notable stories. NOT a full story list.
 4. **Callout** — Yellow box highlighting a milestone or key metric
-5. **Epic Progress** — Table: Epic / Done / Total / % Complete + Project Total row
+5. **Epic Progress** — Table: Epic / Done / Total / % Complete + Project Total row. Footnote: "Complete = Dev Complete, Resolved, or Closed"
 6. **Remaining Work** — Bullet discussion of what's left per epic
 7. **Velocity** — Table: Metric / This Period / Project Avg / Trend + summary narrative
 8. **Developer Metrics** — Table: Developer / Period Pts / Pts/Wk / Proj Pts / Avg Pts/Wk / Period PRs / Proj PRs + summary narrative
-9. **Blockers / Risks**
-10. **Next Steps**
-11. **Appendix: Pull Requests** — Full PR list for the period
-12. **Footer** — Project name • Emergent Software • Confidential
+9. **AI Review** — Stats on Critical/Major issues found and resolved
+10. **Blockers / Risks**
+11. **Next Steps**
+12. **Appendix A: Completed Stories** — Table: Story ID / Title / Epic / Developer / Points / State
+13. **Appendix B: Pull Requests** — Table: PR # / Title / Developer / Date
+14. **Footer** — Project name • Emergent Software • Confidential
 
 ## Table Styling
 

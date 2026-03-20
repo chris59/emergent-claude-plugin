@@ -110,6 +110,18 @@ def set_cell_margins(cell, top: int = 0, bottom: int = 0, start: int = 0, end: i
     tcPr.append(tcMar)
 
 
+def set_cell_border_bottom(cell, color: str, sz: int = 8) -> None:
+    """Set a bottom border on a table cell."""
+    tc = cell._element
+    tcPr = tc.get_or_add_tcPr()
+    tcBorders = parse_xml(
+        f'<w:tcBorders {nsdecls("w")}>'
+        f'  <w:bottom w:val="single" w:sz="{sz}" w:space="0" w:color="{color}"/>'
+        f'</w:tcBorders>'
+    )
+    tcPr.append(tcBorders)
+
+
 def add_run(paragraph, text: str, font_name: str = None, font_size: float = None, bold: bool = None, color: str = None):
     """Add a formatted run to a paragraph."""
     run = paragraph.add_run(text)
@@ -732,11 +744,58 @@ def generate_report(content: dict) -> str:
     for item in content.get("next_steps", []):
         doc.add_paragraph(item, style="List Bullet")
 
-    # Appendix: Pull Requests
+    # Appendix A: Completed Stories
+    if content.get("appendix_stories"):
+        doc.add_heading("Appendix A \u2014 Completed Stories", level=1)
+        stories = content["appendix_stories"]
+        cols = ["ID", "Title", "Epic", "Developer", "Pts", "State"]
+        tbl = doc.add_table(rows=1 + len(stories), cols=len(cols))
+        tbl.style = "Table Grid"
+        tbl.alignment = 1  # center
+        # Header
+        for ci, col_name in enumerate(cols):
+            cell = tbl.rows[0].cells[ci]
+            cell.text = ""
+            p = cell.paragraphs[0]
+            run = p.add_run(col_name)
+            run.bold = True
+            run.font.size = Pt(9)
+            run.font.name = "Calibri Light"
+            if brand.get("primary"):
+                run.font.color.rgb = RGBColor.from_string(brand["primary"])
+            p.alignment = 2 if ci == 4 else 0  # right-align Pts
+            set_cell_border_bottom(cell, brand.get("primary", "333F4F"))
+        # Rows
+        for ri, story in enumerate(stories):
+            row = tbl.rows[ri + 1]
+            vals = [f"#{story['id']}", story['title'][:60], story['epic'].split(':')[0] if ':' in story['epic'] else story['epic'][:20], story['developer'], str(story['points']), story['state']]
+            for ci, val in enumerate(vals):
+                cell = row.cells[ci]
+                cell.text = ""
+                p = cell.paragraphs[0]
+                run = p.add_run(val)
+                run.font.size = Pt(8)
+                run.font.name = "Calibri Light"
+                p.alignment = 2 if ci == 4 else 0
+            if ri % 2 == 0:
+                for cell in row.cells:
+                    set_cell_shading(cell, brand.get("light", "F5F5F5"))
+        # Set column widths
+        for row in tbl.rows:
+            row.cells[0].width = Inches(0.5)
+            row.cells[1].width = Inches(2.8)
+            row.cells[2].width = Inches(1.2)
+            row.cells[3].width = Inches(1.2)
+            row.cells[4].width = Inches(0.4)
+            row.cells[5].width = Inches(0.9)
+        tbl.rows[0].height = Inches(0.25)
+
+    # Appendix B: Pull Requests
     if content.get("pull_requests"):
         pr_data = content["pull_requests"]
+        appendix_label = "Appendix B" if content.get("appendix_stories") else "Appendix A"
         doc.add_heading(
-            f'Appendix A \u2014 Pull Requests Merged ({pr_data["date_range_label"]})',
+            f'{appendix_label} \u2014 Pull Requests Merged ({pr_data["date_range_label"]})',
             level=1,
         )
         for item in pr_data.get("items", []):
