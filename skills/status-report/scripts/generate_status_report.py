@@ -474,8 +474,23 @@ def create_developer_stats_table(doc, devs: list, totals: dict, brand: dict):
         project_prs = dev.get("project_prs", 0)
         period_story_vel = round(period_stories / period_weeks, 1)
         project_story_vel = round(project_stories / proj_weeks, 1) if project_stories else 0
+        prev_stories = dev.get("prev_period_stories", 0)
         is_inactive = dev in inactive
-        trend = _velocity_trend(period_story_vel, project_story_vel) if not is_inactive else "\u2014"
+        # Trend compares this period to previous period (not project avg)
+        if is_inactive:
+            trend = "\u2014"
+        elif prev_stories == 0 and period_stories > 0:
+            trend = "\u25b2 New"
+        elif prev_stories == 0:
+            trend = "\u2014"
+        else:
+            pct = ((period_stories - prev_stories) / prev_stories) * 100
+            if pct > 10:
+                trend = "\u25b2 +" + str(int(pct)) + "%"
+            elif pct < -10:
+                trend = "\u25bc " + str(int(pct)) + "%"
+            else:
+                trend = "\u25b6 Steady"
         pts_combined = str(int(period_pts)) + "/" + str(int(project_pts))
         prs_combined = str(period_prs) + "/" + str(project_prs)
         values = [
@@ -513,9 +528,17 @@ def create_developer_stats_table(doc, devs: list, totals: dict, brand: dict):
     total_project_stories = totals.get("project_stories", sum(d.get("project_stories", 0) for d in devs))
     total_period_prs = totals.get("period_prs", 0)
     total_project_prs = totals.get("project_prs", 0)
-    total_story_vel_period = round(total_period_stories / period_weeks, 1)
-    total_story_vel_project = round(total_project_stories / proj_weeks, 1) if total_project_stories else 0
-    total_trend = _velocity_trend(total_story_vel_period, total_story_vel_project)
+    total_prev_stories = totals.get("prev_period_stories", 0)
+    if total_prev_stories > 0:
+        pct = ((total_period_stories - total_prev_stories) / total_prev_stories) * 100
+        if pct > 10:
+            total_trend = "\u25b2 +" + str(int(pct)) + "%"
+        elif pct < -10:
+            total_trend = "\u25bc " + str(int(pct)) + "%"
+        else:
+            total_trend = "\u25b6 Steady"
+    else:
+        total_trend = "\u2014"
     _style_totals_row(table, total_row, [
         "Team Total",
         str(total_period_stories),
@@ -706,7 +729,7 @@ def generate_report(content: dict) -> str:
         legend = doc.add_paragraph()
         legend.paragraph_format.space_before = Pt(2)
         legend.paragraph_format.space_after = Pt(4)
-        note = legend.add_run("Stories = completed (Dev Complete, Resolved, or Closed). Points and PRs shown as period/project totals. Trend compares story velocity (stories/week) against project average.")
+        note = legend.add_run("Stories = completed (Dev Complete, Resolved, or Closed). Points and PRs shown as period/project totals. Trend compares story count against the previous period.")
         note.italic = True
         note.font.size = Pt(9)
         note.font.color.rgb = RGBColor.from_string("999999")
@@ -762,7 +785,7 @@ def generate_report(content: dict) -> str:
         bd = content["burndown"]
         # Show last 8 weeks max to keep it compact
         display_bd = bd[-8:] if len(bd) > 8 else bd
-        cols_bd = ["Week Of", "Completed", "Cumulative", "Remaining", "% Done"]
+        cols_bd = ["Week Of", "Stories Completed", "Total Done", "Stories Remaining", "% Done"]
         tbl_bd = doc.add_table(rows=1 + len(display_bd), cols=5)
         tbl_bd.alignment = WD_TABLE_ALIGNMENT.CENTER
         _set_table_full_width(tbl_bd)
