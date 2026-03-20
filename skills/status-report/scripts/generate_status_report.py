@@ -756,6 +756,109 @@ def generate_report(content: dict) -> str:
         doc.add_heading("Schedule / Timeline", level=1)
         create_timeline_table(doc, content["timeline"], brand)
 
+    # Burndown Analysis
+    if content.get("burndown"):
+        doc.add_heading("Burndown Analysis", level=1)
+        bd = content["burndown"]
+        # Show last 8 weeks max to keep it compact
+        display_bd = bd[-8:] if len(bd) > 8 else bd
+        cols_bd = ["Week Of", "Completed", "Cumulative", "Remaining", "% Done"]
+        tbl_bd = doc.add_table(rows=1 + len(display_bd), cols=5)
+        tbl_bd.alignment = WD_TABLE_ALIGNMENT.CENTER
+        _set_table_full_width(tbl_bd)
+        _remove_table_borders(tbl_bd)
+        _style_header_row(tbl_bd, cols_bd, brand, right_align_from=1)
+        for ri, row_data in enumerate(display_bd):
+            vals = [row_data["week"], str(row_data["completed"]), str(row_data["cumulative"]),
+                    str(row_data["remaining"]), str(row_data["pct"]) + "%"]
+            for ci, val in enumerate(vals):
+                cell = tbl_bd.cell(ri + 1, ci)
+                set_cell_margins(cell, top=40, bottom=40, start=80, end=80)
+                if ri % 2 == 1:
+                    set_cell_shading(cell, brand["light"])
+                p = cell.paragraphs[0]
+                if ci >= 1:
+                    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                add_run(p, val, font_size=11, color=TEXT_COLOR, font_name=BODY_FONT)
+        if content.get("burndown_summary"):
+            p_bs = doc.add_paragraph()
+            p_bs.paragraph_format.space_before = Pt(4)
+            run_bs = p_bs.add_run(content["burndown_summary"])
+            run_bs.font.size = Pt(11)
+            run_bs.font.name = BODY_FONT
+
+    # Period Comparison
+    if content.get("comparison"):
+        comp = content["comparison"]
+        doc.add_heading("Period Comparison", level=1)
+        cols_cmp = ["Metric", comp["prev"]["label"], comp["curr"]["label"], "Change"]
+        tbl_cmp = doc.add_table(rows=3, cols=4)
+        tbl_cmp.alignment = WD_TABLE_ALIGNMENT.CENTER
+        _set_table_full_width(tbl_cmp)
+        _remove_table_borders(tbl_cmp)
+        _style_header_row(tbl_cmp, cols_cmp, brand, right_align_from=1)
+        comp_rows = [
+            ["Stories Completed", str(comp["prev"]["stories"]), str(comp["curr"]["stories"]),
+             ("{:+d}".format(comp["delta_stories"]))],
+            ["Points Delivered", str(int(comp["prev"]["pts"])), str(int(comp["curr"]["pts"])),
+             ("{:+.0f}".format(comp["delta_pts"]))],
+        ]
+        for ri, row_vals in enumerate(comp_rows):
+            for ci, val in enumerate(row_vals):
+                cell = tbl_cmp.cell(ri + 1, ci)
+                set_cell_margins(cell, top=40, bottom=40, start=80, end=80)
+                if ri % 2 == 1:
+                    set_cell_shading(cell, brand["light"])
+                p = cell.paragraphs[0]
+                if ci >= 1:
+                    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                # Color the delta
+                if ci == 3 and val.startswith("+"):
+                    add_run(p, val, font_size=11, color="2E7D32", font_name=BODY_FONT)
+                elif ci == 3 and val.startswith("-"):
+                    add_run(p, val, font_size=11, color=brand["primary"], font_name=BODY_FONT)
+                else:
+                    add_run(p, val, font_size=11, color=TEXT_COLOR, font_name=BODY_FONT)
+        if content.get("comparison_summary"):
+            p_cs = doc.add_paragraph()
+            p_cs.paragraph_format.space_before = Pt(4)
+            run_cs = p_cs.add_run(content["comparison_summary"])
+            run_cs.font.size = Pt(11)
+            run_cs.font.name = BODY_FONT
+
+    # QA Pipeline
+    if content.get("qa_pipeline"):
+        qa = content["qa_pipeline"]
+        doc.add_heading("QA Pipeline", level=1)
+        p_qa_intro = doc.add_paragraph()
+        run_qi = p_qa_intro.add_run(str(len(qa["stories"])) + " stories currently in QA Testing.")
+        run_qi.font.size = Pt(11)
+        run_qi.font.name = BODY_FONT
+        run_qi.bold = True
+        if qa["stories"]:
+            cols_qa = ["ID", "Title", "Epic", "Developer", "In QA Since"]
+            tbl_qa = doc.add_table(rows=1 + len(qa["stories"]), cols=5)
+            tbl_qa.alignment = WD_TABLE_ALIGNMENT.CENTER
+            _set_table_full_width(tbl_qa)
+            _remove_table_borders(tbl_qa)
+            _style_header_row(tbl_qa, cols_qa, brand, right_align_from=4)
+            for ri, story in enumerate(qa["stories"]):
+                vals = ["#" + str(story["id"]), story["title"][:55], story.get("epic", ""),
+                        story.get("dev", ""), story.get("since", "")]
+                for ci, val in enumerate(vals):
+                    cell = tbl_qa.cell(ri + 1, ci)
+                    set_cell_margins(cell, top=40, bottom=40, start=80, end=80)
+                    if ri % 2 == 1:
+                        set_cell_shading(cell, brand["light"])
+                    p = cell.paragraphs[0]
+                    add_run(p, val, font_size=11, color=TEXT_COLOR, font_name=BODY_FONT)
+        if qa.get("summary"):
+            p_qs = doc.add_paragraph()
+            p_qs.paragraph_format.space_before = Pt(4)
+            run_qs = p_qs.add_run(qa["summary"])
+            run_qs.font.size = Pt(11)
+            run_qs.font.name = BODY_FONT
+
     # Blockers / Risks
     doc.add_heading("Blockers / Risks", level=1)
     for item in content.get("blockers", []):
