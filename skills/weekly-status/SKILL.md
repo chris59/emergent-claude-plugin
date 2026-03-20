@@ -130,6 +130,52 @@ States that count as "done": Closed, Resolved, Dev Complete.
 
 **Developer filtering**: The developer list is fully dynamic — include anyone who is assigned to an in-scope story. Since all queries are already scoped to the team's area path and epic hierarchy, only team members will appear. No exclusion list needed — the area path filter handles this automatically. New developers appear the first time they are assigned a story in the team's backlog.
 
+### Step 3.5: Estimate Unpointed Completed Stories
+
+**Purpose**: Stories that reach Dev Complete or Closed without story points assigned distort velocity metrics and make developers appear unproductive. This step identifies those stories and estimates them before the report is generated.
+
+1. From the in-scope completed stories (Step 3), find all with `StoryPoints = 0` or `null` that are in a done state (Closed, Resolved, Dev Complete).
+
+2. For each unpointed story:
+   a. Fetch the story details: title, description, acceptance criteria
+   b. Fetch linked PRs via `$expand=relations` and check PR diff size:
+      ```bash
+      curl -s -u ":{ADO_TOKEN}" "{ADO_ORG}/{ADO_PROJECT_ENCODED}/_apis/git/repositories/{ADO_REPO_ID}/pullRequests/{PR_ID}?api-version=7.0"
+      ```
+   c. Estimate using the project's point scale (read from `.claude/project.team.md`):
+      - **1 pt**: Config change, typo fix, single-file tweak, <50 lines changed
+      - **2 pts**: Small bug fix, simple UI change, 50-150 lines
+      - **3 pts**: Standard feature, clear scope, 150-400 lines, 2-5 files
+      - **5 pts**: Multi-file feature, moderate complexity, 400-800 lines
+      - **8 pts**: Large feature, multiple components, 800+ lines, integration work
+      - **10+ pts**: Epic-scale work, architectural changes, cross-cutting concerns
+
+3. Present ALL estimates to the user in a table before applying:
+   ```
+   Story ID | Title                          | Developer      | Estimate | Basis
+   #992     | [Widget] Overall Submission Rate | Edwin Zelaya   | 3 pts    | 4 files, 280 lines, 3 ACs
+   #879     | [Widget UX]: Forecast Variance   | Edwin Zelaya   | 3 pts    | 5 files, 350 lines, 2 ACs
+   ```
+
+4. Ask the user: **"Apply these estimates to ADO? (yes/no/adjust)"**
+   - If yes: update each story via ADO REST API:
+     ```bash
+     curl -s -u ":{ADO_TOKEN}" -X PATCH \
+       "{ADO_ORG}/{ADO_PROJECT_ENCODED}/_apis/wit/workitems/{ID}?api-version=7.0" \
+       -H "Content-Type: application/json-patch+json" \
+       -d '[
+         {"op":"add","path":"/fields/Microsoft.VSTS.Scheduling.StoryPoints","value":{POINTS}},
+         {"op":"add","path":"/fields/System.Tags","value":"AI-Estimated"},
+         {"op":"add","path":"/fields/System.History","value":"Story points auto-assigned by AI based on PR complexity and acceptance criteria. Review and adjust if needed."}
+       ]'
+     ```
+   - If adjust: let the user modify specific estimates, then apply
+   - If no: proceed with 0 points (report will note the estimation gap)
+
+5. After applying, re-calculate period and project stats with the updated points.
+
+**Important**: This step is interactive — always confirm before writing to ADO. Tag all AI-estimated stories with `AI-Estimated` so they are easily findable and reviewable.
+
 ### Step 4: Query Pull Requests (Scoped)
 
 Get completed PRs:
