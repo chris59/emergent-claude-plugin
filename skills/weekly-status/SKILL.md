@@ -65,45 +65,58 @@ Also calculate `PROJECT_START_DATE` from the first git commit: `git log --revers
 
 Calculate `PROJECT_WEEKS` = (today - PROJECT_START_DATE) / 7.
 
-### Step 2: Query Work Items Changed in Period
+### Step 2: Establish the Active Epic Scope
 
-Find all work items changed during the reporting period by ANY developer (not just @Me):
+**CRITICAL**: ALL data in this report must be scoped to stories under the active Epics only. ADO projects often contain legacy/closed Epics from earlier phases — including their stories would inflate every metric.
 
+First, get the active Epic list. Query Epics in active states:
 ```bash
-az boards query --wiql "SELECT [System.Id], [System.Title], [System.WorkItemType], [System.State], [Microsoft.VSTS.Scheduling.StoryPoints], [System.AssignedTo], [System.ChangedDate] FROM WorkItems WHERE [System.WorkItemType] IN ('User Story', 'Bug') AND [System.ChangedDate] >= '{START_DATE}' AND [System.ChangedDate] < '{END_DATE_PLUS_ONE}' AND [System.State] IN ('Closed', 'Dev Complete', 'Resolved') ORDER BY [System.AssignedTo]" --output json
+az boards query --wiql "SELECT [System.Id], [System.Title], [System.State] FROM WorkItems WHERE [System.WorkItemType] = 'Epic' AND [System.State] NOT IN ('Closed', 'Removed', 'Unapproved / Future') ORDER BY [Microsoft.VSTS.Common.BacklogPriority]" --output json
 ```
 
-Group by developer (AssignedTo) to calculate per-developer period stats.
+If `.claude/project.team.md` contains an "Active Epics" list, use that instead — it's the user's curated view.
 
-**Important**: The developer list is dynamic — include anyone with activity in the period. Then read `.claude/project.team.md` for a "Developer Report Exclusions" list. Remove any excluded names — these are people with historical ADO items who are not on this project. New developers automatically appear when they first contribute.
+Save the list of active Epic IDs. Then build the full story-to-epic mapping:
+1. For each active Epic, fetch child Features via `$expand=relations`
+2. For each Feature, fetch child Stories via `$expand=relations`
+3. Build a set of **in-scope story IDs** — only stories that roll up to an active Epic
 
-For each work item, fetch the parent Feature and grandparent Epic:
+**Every subsequent query in this report must filter to in-scope stories only.** This applies to:
+- Epic progress table
+- Period work items (Key Achievements)
+- Developer stats (period AND project totals)
+- Velocity calculations
+- PR list (only PRs linked to in-scope stories)
+
+### Step 3: Query Work Items (Scoped to Active Epics)
+
+Get ALL stories under active Epics (for project totals and epic progress):
 ```bash
-curl -s -u ":{ADO_TOKEN}" "{ADO_ORG}/{ADO_PROJECT_ENCODED}/_apis/wit/workitems/{id}?$expand=relations&api-version=7.0"
+az boards query --wiql "SELECT [System.Id], [System.Title], [System.WorkItemType], [System.State], [Microsoft.VSTS.Scheduling.StoryPoints], [System.AssignedTo], [System.ChangedDate] FROM WorkItems WHERE [System.WorkItemType] IN ('User Story', 'Bug') AND [System.State] <> 'Removed' ORDER BY [System.AssignedTo]" --output json
 ```
 
-### Step 3: Query All-Time Epic Progress
+Then filter results to only in-scope story IDs (from Step 2).
 
-For each active Epic, get its child Features, then get all stories under those Features. Calculate done/total/% for each Epic. **This is all-time project data, not period-scoped.**
+From this filtered set, calculate:
+- **Epic progress**: done/total/% per Epic (all-time, not period-scoped)
+- **Period work items**: stories where ChangedDate falls in the period AND state is done
+- **All-time developer stats**: total points per developer across the project
+- **Period developer stats**: points per developer in this period only
 
 States that count as "done": Closed, Resolved, Dev Complete.
-Exclude Removed stories from totals.
 
-Also query all-time developer stats:
-```bash
-az boards query --wiql "SELECT [System.Id], [Microsoft.VSTS.Scheduling.StoryPoints], [System.AssignedTo] FROM WorkItems WHERE [System.WorkItemType] IN ('User Story', 'Bug') AND [System.State] IN ('Closed', 'Resolved', 'Dev Complete') AND [System.State] <> 'Removed'" --output json
-```
+**Developer filtering**: The developer list is dynamic — include anyone with activity. Read `.claude/project.team.md` for a "Developer Report Exclusions" list and remove excluded names. New developers appear automatically when they first contribute.
 
-Group by developer for project-total points.
+### Step 4: Query Pull Requests (Scoped)
 
-### Step 4: Query Pull Requests
-
-Get all-time completed PRs to calculate per-developer project PR totals:
+Get completed PRs:
 ```bash
 curl -s -u ":{ADO_TOKEN}" "{ADO_ORG}/{ADO_PROJECT_ENCODED}/_apis/git/repositories/{ADO_REPO_ID}/pullRequests?searchCriteria.status=completed&$top=1000&api-version=7.0"
 ```
 
-Filter to period PRs separately for the period column.
+Filter to PRs that reference in-scope stories (check PR title for story IDs like `#1279` or `Story #1279`). PRs without a story reference should still be included if they were created by an active developer during the period — they're likely deployment fixes or infrastructure work.
+
+Calculate per-developer PR totals (all-time and period).
 
 ### Step 5: Locate the Script
 
