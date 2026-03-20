@@ -87,15 +87,33 @@ Read every source the user identifies:
   ```
   If no Figma token is configured, note it and ask the user to describe the key screens instead.
 
-#### 1c. Check Existing Analysis
+#### 1c. Check for Existing Requirements (Update Mode)
 
-Check `.claude/requirements/` for existing analysis that might overlap with or inform this topic:
+Check `.claude/requirements/` for existing analysis on this topic:
 
 ```bash
-ls "c:/path/to/.claude/requirements/" 2>/dev/null || echo "no-requirements-dir"
+ls .claude/requirements/ 2>/dev/null || echo "no-requirements-dir"
 ```
 
-If relevant directories exist, read their `requirements.md` files and note any overlap.
+**If an existing `requirements.md` is found for this topic** (matching directory name or topic keywords):
+
+1. Read the existing document fully
+2. Tell the user what's already captured — summarize the current requirements, open questions, and suggested stories
+3. Ask: **"This topic has an existing requirements analysis. What would you like to do?"**
+   - **Update** — add new information (meeting transcript, additional notes, answers to open questions) while preserving everything already documented
+   - **Revise** — rework specific sections based on new understanding
+   - **Continue** — pick up where we left off (answer remaining open questions, refine decomposition)
+
+4. When updating, **merge new inputs into the existing document** — do NOT overwrite. Specifically:
+   - Add new sources to the Sources section
+   - Append new requirements with the next FR/NFR number (don't renumber existing ones)
+   - Move answered questions from "Unresolved" to "Resolved" with the answer
+   - Update story decomposition if new requirements change the scope
+   - Add a `## Change Log` entry at the bottom: `- {date}: Updated with {source description}`
+
+This is the primary way teams iterate on requirements over time — initial analysis, then updates as meeting transcripts arrive, stakeholder feedback comes in, or designs evolve.
+
+**If no existing analysis is found**, proceed to Step 1d (new analysis).
 
 #### 1d. Check ADO for Related Work
 
