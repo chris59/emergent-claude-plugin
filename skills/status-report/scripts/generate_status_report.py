@@ -59,7 +59,7 @@ from docx.oxml import parse_xml
 # Emergent fallback brand colors (extracted from EmergentStyles.docx)
 _EMERGENT_PRIMARY = "EE3342"   # Emergent coral/red — headings, header bar
 _EMERGENT_ACCENT = "333F4F"    # Dark navy — accent bar, title text
-_EMERGENT_LIGHT = "F9E8E9"     # Light coral tint — alternating table rows
+_EMERGENT_LIGHT = "FDF4F4"     # Very light coral tint — alternating table rows
 
 # Fixed colors independent of project branding
 CALLOUT_YELLOW = "FFF2CC"
@@ -264,7 +264,7 @@ def create_timeline_table(doc, phases: list, brand: dict):
         cell = table.cell(0, ci)
         set_cell_shading(cell, brand["primary"])
         p = cell.paragraphs[0]
-        add_run(p, col_name, bold=True, font_size=10, color=WHITE)
+        add_run(p, col_name, bold=True, font_size=11, color=WHITE)
 
     # Data rows with alternating shading
     for ri, phase in enumerate(phases):
@@ -278,7 +278,7 @@ def create_timeline_table(doc, phases: list, brand: dict):
             cell = table.cell(ri + 1, ci)
             if ri % 2 == 1:
                 set_cell_shading(cell, brand["light"])
-            add_run(cell.paragraphs[0], val, font_size=10, color=TEXT_COLOR)
+            add_run(cell.paragraphs[0], val, font_size=11, color=TEXT_COLOR)
 
     return table
 
@@ -320,7 +320,7 @@ def _style_header_row(table, cols: list, brand: dict, right_align_from: int = 1)
         p = cell.paragraphs[0]
         if ci >= right_align_from:
             p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        add_run(p, col_name, bold=True, font_size=10, color=brand["primary"], font_name=BODY_FONT)
+        add_run(p, col_name, bold=True, font_size=11, color=brand["primary"], font_name=BODY_FONT)
     _set_header_row_repeat(table)
 
 
@@ -341,7 +341,7 @@ def _style_totals_row(table, row_idx: int, values: list, brand: dict, right_alig
         p = cell.paragraphs[0]
         if ci >= right_align_from:
             p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        add_run(p, str(val), font_size=10, color=brand["primary"], font_name=BODY_FONT, bold=True)
+        add_run(p, str(val), font_size=11, color=brand["primary"], font_name=BODY_FONT, bold=True)
 
 
 def create_epic_summary_table(doc, epics: list, brand: dict):
@@ -375,9 +375,9 @@ def create_epic_summary_table(doc, epics: list, brand: dict):
                 p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             if ci == 3:
                 clr = brand["primary"] if pct == 100 else TEXT_COLOR
-                add_run(p, val, font_size=10, color=clr, font_name=BODY_FONT, bold=(pct == 100))
+                add_run(p, val, font_size=11, color=clr, font_name=BODY_FONT, bold=(pct == 100))
             else:
-                add_run(p, val, font_size=10, color=TEXT_COLOR, font_name=BODY_FONT)
+                add_run(p, val, font_size=11, color=TEXT_COLOR, font_name=BODY_FONT)
 
     # Totals row
     total_row = len(epics) + 1
@@ -412,11 +412,11 @@ def create_velocity_table(doc, velocity: dict, brand: dict):
             if ci >= 1:
                 p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             if ci == 3 and val.startswith("\u25b2"):
-                add_run(p, val, font_size=10, color="2E7D32", font_name=BODY_FONT)
+                add_run(p, val, font_size=11, color="2E7D32", font_name=BODY_FONT)
             elif ci == 3 and val.startswith("\u25bc"):
-                add_run(p, val, font_size=10, color=brand["primary"], font_name=BODY_FONT)
+                add_run(p, val, font_size=11, color=brand["primary"], font_name=BODY_FONT)
             else:
-                add_run(p, str(val), font_size=10, color=TEXT_COLOR, font_name=BODY_FONT)
+                add_run(p, str(val), font_size=11, color=TEXT_COLOR, font_name=BODY_FONT)
 
     # Totals row
     if velocity.get("totals"):
@@ -445,9 +445,10 @@ def _velocity_trend(period_vel: float, project_vel: float) -> str:
 
 
 def create_developer_stats_table(doc, devs: list, totals: dict, brand: dict):
-    """Create a per-developer stats table with velocity and trend."""
-    cols = ["Developer", "Period Pts", "Pts/Wk", "Proj Pts", "Avg Pts/Wk", "Period PRs", "PRs/Wk", "Proj PRs", "Trend"]
-    table = doc.add_table(rows=2 + len(devs), cols=9)
+    """Create a per-developer stats table with velocity and trend. Stories first."""
+    INACTIVE_COLOR = "AAAAAA"
+    cols = ["Developer", "Stories", "Proj Stories", "Points", "PRs", "Trend"]
+    table = doc.add_table(rows=2 + len(devs), cols=6)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     _set_table_full_width(table)
     _remove_table_borders(table)
@@ -457,62 +458,70 @@ def create_developer_stats_table(doc, devs: list, totals: dict, brand: dict):
 
     _style_header_row(table, cols, brand)
 
+    # Sort: active devs by period stories desc, then inactive at bottom
+    active = [d for d in devs if d.get("period_stories", 0) > 0 or d.get("period_pts", 0) > 0 or d.get("period_prs", 0) > 0]
+    inactive = [d for d in devs if d not in active]
+    active.sort(key=lambda d: (d.get("period_stories", 0), d.get("period_pts", 0)), reverse=True)
+    sorted_devs = active + inactive
+
     # Developer rows
-    for ri, dev in enumerate(devs):
+    for ri, dev in enumerate(sorted_devs):
         period_pts = dev.get("period_pts", 0)
         project_pts = dev.get("project_pts", 0)
+        period_stories = dev.get("period_stories", 0)
+        project_stories = dev.get("project_stories", 0)
         period_prs = dev.get("period_prs", 0)
         project_prs = dev.get("project_prs", 0)
-        period_vel = round(period_pts / period_weeks, 1)
-        project_vel = round(project_pts / proj_weeks, 1)
-        prs_wk = round(period_prs / period_weeks, 1)
-        trend = _velocity_trend(period_vel, project_vel)
+        period_story_vel = round(period_stories / period_weeks, 1)
+        project_story_vel = round(project_stories / proj_weeks, 1) if project_stories else 0
+        is_inactive = dev in inactive
+        trend = _velocity_trend(period_story_vel, project_story_vel) if not is_inactive else "\u2014"
+        pts_combined = str(int(period_pts)) + "/" + str(int(project_pts))
+        prs_combined = str(period_prs) + "/" + str(project_prs)
         values = [
             dev["name"],
-            str(period_pts),
-            str(period_vel),
-            str(project_pts),
-            str(project_vel),
-            str(period_prs),
-            str(prs_wk),
-            str(project_prs),
+            str(period_stories),
+            str(project_stories),
+            pts_combined,
+            prs_combined,
             trend,
         ]
+        text_color = INACTIVE_COLOR if is_inactive else TEXT_COLOR
         for ci, val in enumerate(values):
             cell = table.cell(ri + 1, ci)
             set_cell_margins(cell, top=40, bottom=40, start=80, end=80)
-            if ri % 2 == 1:
+            if is_inactive:
+                set_cell_shading(cell, "F0F0F0")
+            elif ri % 2 == 1:
                 set_cell_shading(cell, brand["light"])
             p = cell.paragraphs[0]
             if ci >= 1:
                 p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             # Color trend indicators
-            if ci == 6 and val.startswith("\u25b2"):
-                add_run(p, val, font_size=10, color="2E7D32", font_name=BODY_FONT)
-            elif ci == 6 and val.startswith("\u25bc"):
-                add_run(p, val, font_size=10, color=brand["primary"], font_name=BODY_FONT)
+            if ci == 5 and not is_inactive and val.startswith("\u25b2"):
+                add_run(p, val, font_size=11, color="2E7D32", font_name=BODY_FONT)
+            elif ci == 5 and not is_inactive and val.startswith("\u25bc"):
+                add_run(p, val, font_size=11, color=brand["primary"], font_name=BODY_FONT)
             else:
-                add_run(p, val, font_size=10, color=TEXT_COLOR, font_name=BODY_FONT)
+                add_run(p, val, font_size=11, color=text_color, font_name=BODY_FONT)
 
     # Totals row
-    total_row = len(devs) + 1
+    total_row = len(sorted_devs) + 1
     period_total = totals.get("period_pts", 0)
     project_total = totals.get("project_pts", 0)
+    total_period_stories = totals.get("period_stories", sum(d.get("period_stories", 0) for d in devs))
+    total_project_stories = totals.get("project_stories", sum(d.get("project_stories", 0) for d in devs))
     total_period_prs = totals.get("period_prs", 0)
     total_project_prs = totals.get("project_prs", 0)
-    total_period_vel = round(period_total / period_weeks, 1)
-    total_project_vel = round(project_total / proj_weeks, 1)
-    total_prs_wk = round(total_period_prs / period_weeks, 1)
-    total_trend = _velocity_trend(total_period_vel, total_project_vel)
+    total_story_vel_period = round(total_period_stories / period_weeks, 1)
+    total_story_vel_project = round(total_project_stories / proj_weeks, 1) if total_project_stories else 0
+    total_trend = _velocity_trend(total_story_vel_period, total_story_vel_project)
     _style_totals_row(table, total_row, [
         "Team Total",
-        str(period_total),
-        str(total_period_vel),
-        str(project_total),
-        str(total_project_vel),
-        str(total_period_prs),
-        str(total_prs_wk),
-        str(total_project_prs),
+        str(total_period_stories),
+        str(total_project_stories),
+        str(int(period_total)) + "/" + str(int(project_total)),
+        str(total_period_prs) + "/" + str(total_project_prs),
         total_trend,
     ], brand)
 
@@ -593,13 +602,13 @@ def generate_report(content: dict) -> str:
             footer_text = f'{brand["project_name"]} \u2022 Emergent Software \u2022 Confidential'
         p_line.alignment = WD_ALIGN_PARAGRAPH.CENTER
         add_run(p_line, "2038 Ford Pkwy, Suite 439, Saint Paul, MN 55116  |  emergentsoftware.net",
-                font_name=BODY_FONT, font_size=10, color="999999")
+                font_name=BODY_FONT, font_size=11, color="999999")
 
         # Page number line
         p_page = footer.add_paragraph()
         p_page.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p_page.paragraph_format.space_before = Pt(2)
-        run_pre = add_run(p_page, "Page ", font_name=BODY_FONT, font_size=10, color="999999")
+        run_pre = add_run(p_page, "Page ", font_name=BODY_FONT, font_size=11, color="999999")
         # Insert PAGE field
         fldChar1 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="begin"/>')
         run_field = p_page.add_run()
@@ -619,7 +628,7 @@ def generate_report(content: dict) -> str:
         fldChar3 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="end"/>')
         run_field5 = p_page.add_run()
         run_field5._element.append(fldChar3)
-        add_run(p_page, " of ", font_name=BODY_FONT, font_size=10, color="999999")
+        add_run(p_page, " of ", font_name=BODY_FONT, font_size=11, color="999999")
         # Insert NUMPAGES field
         fldChar4 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="begin"/>')
         run_np1 = p_page.add_run()
@@ -649,8 +658,12 @@ def generate_report(content: dict) -> str:
     doc.add_heading("Key Achievements", level=1)
     for section in content.get("sections", []):
         doc.add_heading(section["heading"], level=2)
-        for item in section.get("items", []):
-            doc.add_paragraph(item, style="List Bullet")
+        for i, item in enumerate(section.get("items", [])):
+            if i == 0:
+                # First item is a summary paragraph, not a bullet
+                doc.add_paragraph(item)
+            else:
+                doc.add_paragraph(item, style="List Bullet")
 
     # Callout box
     if content.get("callout"):
@@ -672,7 +685,7 @@ def generate_report(content: dict) -> str:
             p = doc.add_paragraph()
             run = p.add_run(content["remaining_work_footnote"])
             run.italic = True
-            run.font.size = Pt(9)
+            run.font.size = Pt(11)
             run.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
 
     # Velocity
@@ -689,6 +702,15 @@ def generate_report(content: dict) -> str:
         doc.add_heading("Developer Metrics", level=1)
         totals = content.get("developer_totals", {})
         create_developer_stats_table(doc, content["developer_stats"], totals, brand)
+        # Table legend — small italic note
+        legend = doc.add_paragraph()
+        legend.paragraph_format.space_before = Pt(2)
+        legend.paragraph_format.space_after = Pt(4)
+        note = legend.add_run("Stories = completed (Dev Complete, Resolved, or Closed). Points and PRs shown as period/project totals. Trend compares story velocity (stories/week) against project average.")
+        note.italic = True
+        note.font.size = Pt(9)
+        note.font.color.rgb = RGBColor.from_string("999999")
+        note.font.name = BODY_FONT
         if content.get("developer_summary"):
             doc.add_heading("Summary", level=2)
             for item in content["developer_summary"] if isinstance(content["developer_summary"], list) else [content["developer_summary"]]:
@@ -717,7 +739,7 @@ def generate_report(content: dict) -> str:
             p = cell.paragraphs[0]
             if i >= 2:
                 p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-            add_run(p, v, font_size=10, font_name=BODY_FONT)
+            add_run(p, v, font_size=11, font_name=BODY_FONT)
 
         if cq.get("summary"):
             doc.add_heading("Summary", level=2)
@@ -759,12 +781,15 @@ def generate_report(content: dict) -> str:
             p = cell.paragraphs[0]
             run = p.add_run(col_name)
             run.bold = True
-            run.font.size = Pt(9)
+            run.font.size = Pt(11)
             run.font.name = "Calibri Light"
             if brand.get("primary"):
                 run.font.color.rgb = RGBColor.from_string(brand["primary"])
             p.alignment = 2 if ci == 4 else 0  # right-align Pts
             set_cell_border_bottom(cell, brand.get("primary", "333F4F"))
+        # Set header row to repeat across pages
+        tbl.rows[0]._tr.get_or_add_trPr().append(
+            parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
         # Rows
         for ri, story in enumerate(stories):
             row = tbl.rows[ri + 1]
@@ -774,7 +799,7 @@ def generate_report(content: dict) -> str:
                 cell.text = ""
                 p = cell.paragraphs[0]
                 run = p.add_run(val)
-                run.font.size = Pt(8)
+                run.font.size = Pt(11)
                 run.font.name = "Calibri Light"
                 p.alignment = 2 if ci == 4 else 0
             if ri % 2 == 0:
