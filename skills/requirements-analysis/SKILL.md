@@ -139,7 +139,16 @@ What must the system DO? These are observable behaviors — things that can be v
 For each requirement:
 - State it as a clear, testable behavior (not an implementation choice)
 - Identify which domain entities or processes are involved (use terms from `project.domains.md` if available)
-- Note the source it came from (e.g., "Meeting notes, 2024-03-15")
+- **Citation (MANDATORY)**: Every requirement MUST cite its origin. Use the format `[Source: {origin}]`. Origins include:
+  - `[Source: Client — meeting 2026-03-20]` — requirement came directly from the client
+  - `[Source: Client — email from {name}, 2026-03-15]` — client communication
+  - `[Source: Stakeholder — {name}, verbal]` — stakeholder direction
+  - `[Source: Design — Figma {screen name}]` — derived from a design artifact
+  - `[Source: Dev — {name}, technical analysis]` — developer-identified requirement (infrastructure, security, etc.)
+  - `[Source: Manager — {name}, scope decision]` — management direction
+  - `[Source: Inferred — {basis}]` — not explicitly stated but reasonably inferred from other requirements
+  - `[Source: Regulation — {standard}]` — compliance or regulatory requirement
+- Requirements without client origin should be flagged for validation — they may be valid (security hardening, accessibility) but the team should consciously decide to include them
 - Assign a temporary label: FR-1, FR-2, ...
 
 Good functional requirement: "When a user submits a forecast, the system records the submission timestamp and the submitting user's identity."
@@ -227,10 +236,19 @@ Once you have enough information to proceed (at minimum: Step 1 inputs captured 
 
 Determine the feature slug: lowercase kebab-case from the topic (e.g., "dealer forecast export" → `dealer-forecast-export`). This becomes the subdirectory name.
 
-Create the output directory if it doesn't exist:
+Create the output directory and source archive:
 ```bash
-mkdir -p ".claude/requirements/{feature-slug}"
+mkdir -p ".claude/requirements/{feature-slug}/sources"
 ```
+
+**Archive all raw source material** into the `sources/` subdirectory:
+- Meeting notes/transcripts → `sources/meeting-{date}.md`
+- Emails → `sources/email-{person}-{date}.md`
+- Pasted content → `sources/notes-{date}.md`
+- Screenshots → copy to `sources/` with descriptive names
+- Document summaries → `sources/summary-{doc-name}.md`
+
+This creates a searchable archive. When someone asks "where did FR-3 come from?", the source file is right there.
 
 Write the document to `.claude/requirements/{feature-slug}/requirements.md`:
 
@@ -238,45 +256,73 @@ Write the document to `.claude/requirements/{feature-slug}/requirements.md`:
 # Requirements: {Feature Name}
 
 ## Sources
-- {source 1} (e.g., "Meeting notes — {date}", "Email from {person}", "Screenshot — {filename}", "Verbal description")
-- {source 2}
-- ...
+
+| ID | Type | Description | Date | Location |
+|----|------|-------------|------|----------|
+| S1 | Meeting notes | {description} | {date} | `.claude/requirements/{slug}/sources/meeting-{date}.md` |
+| S2 | Email | From {person} re: {subject} | {date} | `.claude/requirements/{slug}/sources/email-{date}.md` |
+| S3 | Design | Figma — {screen/component} | {date} | {Figma URL or screenshot path} |
+| S4 | Document | {document name} | {date} | {file path} |
+
+**Important**: Save all raw source material into `.claude/requirements/{slug}/sources/` so it can be searched and referenced later. Meeting transcripts, emails, and notes should be saved as markdown files. Screenshots and images should be copied as-is.
 
 ## Context
+
 {2-4 sentences: what this feature/capability is, who it serves, and why it matters to the business.
 Use domain language. Reference any ADO Features or Epics this falls under.}
 
 ## Functional Requirements
 
-- **FR-1**: {requirement stated as observable system behavior} — *{rationale: why this is required, sourced from where}*
-- **FR-2**: {requirement} — *{rationale}*
-- ...
+| ID | Requirement | Priority | Source | Validated |
+|----|-------------|----------|--------|-----------|
+| FR-1 | {requirement stated as observable system behavior} | Must | [S1] Client — {name} | Yes/No |
+| FR-2 | {requirement} | Should | [S2] Dev — technical analysis | Pending |
+
+**Priority levels** (MoSCoW):
+- **Must** — non-negotiable for delivery
+- **Should** — important but delivery is viable without it
+- **Could** — desirable if time permits
+- **Won't** — explicitly out of scope (document WHY to prevent scope creep)
+
+**Validated column**: Has the requirement been confirmed by the client or authoritative stakeholder? Requirements sourced from Dev/Manager/Inferred should be validated before story creation.
 
 ## Non-Functional Requirements
 
-- **NFR-1**: {requirement} — *{rationale}*
-- **NFR-2**: {requirement} — *{rationale}*
+| ID | Requirement | Category | Source | Validated |
+|----|-------------|----------|--------|-----------|
+| NFR-1 | {requirement} | Performance | [S1] | Yes |
+| NFR-2 | {requirement} | Security | [Dev — inferred] | Pending |
+
+Categories: Performance, Security, Accessibility, Reliability, UX, Data Retention, Compliance
 
 ## Constraints & Dependencies
 
-- {constraint or external dependency — be specific about system name, timing, or data source}
+- {constraint or external dependency — be specific about system name, timing, or data source} `[Source: {origin}]`
 - ...
 
 ## Edge Cases & Error Handling
 
-- **{scenario}**: {expected system behavior}
-- **{scenario}**: {expected system behavior}
+- **{scenario}**: {expected system behavior} `[Source: {origin}]`
+- **{scenario}**: {expected system behavior} `[Source: {origin}]`
 - ...
 
-## Open Questions (Resolved)
+## Clarifying Questions Log
 
-- **Q{n}**: {question} — **Answer**: {answer provided by user in Step 3}
-- ...
+Track ALL questions raised during analysis — both answered and pending. This is the audit trail of how requirements were refined.
 
-## Open Questions (Unresolved)
+### Resolved
 
-- **Q{n}**: {question} — *Needs input from {stakeholder or role}*
-- ...
+| # | Question | Asked | Answered By | Answer | Date | Impact |
+|---|----------|-------|-------------|--------|------|--------|
+| Q1 | {question} | Step 3 | {person} | {answer} | {date} | Updated FR-2 |
+| Q2 | {question} | Meeting | {person} | {answer} | {date} | Added NFR-3 |
+
+### Unresolved
+
+| # | Question | Category | Needed From | Why It Matters | Blocking |
+|---|----------|----------|-------------|----------------|----------|
+| Q3 | {question} | Business Logic | {stakeholder} | {what decision this unlocks} | Story 2 |
+| Q4 | {question} | Integration | {team/vendor} | {what this affects} | No |
 
 ## Related ADO Items
 
@@ -299,6 +345,22 @@ Each story is a cohesive end-to-end unit of deliverable work — not a layer or 
    - AC2: {testable acceptance criterion}
 
 (If the entire scope fits one story, say so — don't force a split.)
+
+## Traceability Matrix
+
+Maps requirements back to sources and forward to suggested stories. This is the single view that answers "where did this come from?" and "where does it go?"
+
+| Requirement | Source | Priority | Validated | Story |
+|-------------|--------|----------|-----------|-------|
+| FR-1 | S1 — Client meeting | Must | Yes | Story 1 |
+| FR-2 | S2 — Dev analysis | Should | Pending | Story 1 |
+| NFR-1 | S1 — Client meeting | Must | Yes | Story 2 |
+| FR-3 | Inferred | Could | No | Backlog |
+
+## Change Log
+
+- {date}: Initial analysis from {sources}
+
 ```
 
 Guidelines for the decomposition:
