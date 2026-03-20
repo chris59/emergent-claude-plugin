@@ -187,6 +187,16 @@ Filter to PRs that reference in-scope stories (check PR title for story IDs like
 
 Calculate per-developer PR totals (all-time and period).
 
+### Step 4.5: Gather Burndown, QA Pipeline, and Comparison Data
+
+**Burndown**: From the in-scope story set, bin completions by week (using StateChangeDate). For each week from project start to today, count stories completed that week, cumulative total, and remaining. Include in JSON as `burndown` array.
+
+**QA Pipeline**: Query in-scope stories currently in "QA Testing" state. Include story ID, title, epic, developer, and the date they entered QA (StateChangeDate). Include in JSON as `qa_pipeline` object.
+
+**Period Comparison**: Calculate the same metrics for the previous period (same length, ending where this period starts). For a 2-week report covering Mar 6–20, the previous period is Feb 20–Mar 5. Compare stories completed and points delivered. Include in JSON as `comparison` object with delta values.
+
+**Previous period developer stats**: For each developer, also query their story count in the previous period. Include as `prev_period_stories` in each developer object — used for context in summaries.
+
 ### Step 5: Locate the Script
 
 Look for `generate_status_report.py` in this order:
@@ -243,7 +253,7 @@ Write a JSON file with this structure:
         "summary": "2-4 sentence narrative explaining velocity trends. If above average, explain why (e.g., production push). If below, explain context (e.g., shifting to integration work with external dependencies). Anticipate whether velocity will increase, decrease, or hold steady and why."
     },
     "developer_stats": [
-        {"name": "Developer Name", "period_pts": 41, "project_pts": 604, "period_prs": 30, "project_prs": 301}
+        {"name": "Developer Name", "period_pts": 41, "project_pts": 604, "period_stories": 12, "project_stories": 85, "period_prs": 30, "project_prs": 301, "prev_period_stories": 15}
     ],
     "developer_totals": {
         "period_pts": 75,
@@ -259,6 +269,23 @@ Write a JSON file with this structure:
     "pull_requests": {
         "date_range_label": "M/D – M/D",
         "items": ["PR #NNN: Title (M/D)"]
+    },
+    "burndown": [
+        {"week": "2026-03-09", "completed": 29, "cumulative": 247, "remaining": 59, "pct": 80.7}
+    ],
+    "burndown_summary": "Narrative explaining the burndown trend — acceleration, deceleration, projected completion.",
+    "comparison": {
+        "prev": {"label": "Feb 20 – Mar 5", "stories": 123, "pts": 310},
+        "curr": {"label": "Mar 6 – Mar 20", "stories": 74, "pts": 275},
+        "delta_stories": -49,
+        "delta_pts": -35
+    },
+    "comparison_summary": "Narrative explaining why the period-over-period numbers changed. Call out anomalies in the previous period if applicable.",
+    "qa_pipeline": {
+        "stories": [
+            {"id": 850, "title": "Story title", "epic": "Epic Name", "dev": "Dev Name", "since": "2026-03-17"}
+        ],
+        "summary": "Narrative about QA bottlenecks, concentration, and impact on project velocity."
     },
     "appendix_stories": [
         {"id": 1279, "title": "Story title", "epic": "Epic Name", "developer": "Dev Name", "points": 8, "state": "Dev Complete"}
@@ -308,14 +335,17 @@ Tell the user:
 4. **Callout** — Yellow box highlighting a milestone or key metric
 5. **Epic Progress** — Table: Epic / Done / Total / % Complete + Project Total row. Footnote: "Complete = Dev Complete, Resolved, or Closed"
 6. **Remaining Work** — Bullet discussion of what's left per epic
-7. **Velocity** — Table: Metric / This Period / Project Avg / Trend + summary narrative
-8. **Developer Metrics** — Table: Developer / Period Pts / Pts/Wk / Proj Pts / Avg Pts/Wk / Period PRs / Proj PRs + summary narrative
-9. **AI Review** — Stats on Critical/Major issues found and resolved
-10. **Blockers / Risks**
-11. **Next Steps**
-12. **Appendix A: Completed Stories** — Table: Story ID / Title / Epic / Developer / Points / State
-13. **Appendix B: Pull Requests** — Table: PR # / Title / Developer / Date
-14. **Footer** — Project name • Emergent Software • Confidential
+7. **Velocity** — Table: Stories/Week, Points/Week, PRs/Week (period vs project avg + trend). Stories first. Summary narrative.
+8. **Developer Metrics** — Table: Developer / Stories / Proj Stories / Points (period/proj) / PRs (period/proj) / Trend. Sorted by period stories desc. Inactive devs greyed at bottom. Italic legend explaining columns. Trend = story velocity vs developer's own project average.
+9. **Burndown Analysis** — Table (last 8 weeks): Week Of / Stories Completed / Total Done / Stories Remaining / % Done. Summary narrative explaining acceleration/deceleration.
+10. **Period Comparison** — Table: Metric / Previous Period / This Period / Change. Green/red delta coloring. Summary explaining why velocity changed.
+11. **QA Pipeline** — Count of stories in QA Testing state, table with ID / Title / Epic / Developer / In QA Since. Summary noting bottlenecks.
+12. **AI Review** — Stats on Critical/Major issues found and resolved
+13. **Blockers / Risks**
+14. **Next Steps**
+15. **Appendix A: Completed Stories** — Table: Story ID / Title / Epic / Developer / Points / State. Header repeats across pages.
+16. **Appendix B: Pull Requests** — Table: PR # / Title / Developer / Date
+17. **Footer** — Project name • Emergent Software • Confidential
 
 ## Table Styling
 
