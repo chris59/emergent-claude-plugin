@@ -1,0 +1,709 @@
+"""
+Generate a branded status report .docx from JSON content.
+
+Usage:
+    python generate_status_report.py content.json
+
+The JSON file should have this structure:
+{
+    "date_range": "March 4 – March 18, 2026",
+    "output_path": "/path/to/ProjectName-StatusUpdate-03182026.docx",
+    "branding": {
+        "project_name": "Honda AIM",
+        "primary_color": "2E7D32",
+        "accent_color": "1565C0",
+        "light_color": "E8F5E9",
+        "footer_text": "Honda AIM • Emergent Software • Confidential"
+    },
+    "executive_summary": "Summary paragraph text...",
+    "sections": [
+        {
+            "heading": "Section Name",
+            "items": ["Bullet point 1", "Bullet point 2"]
+        }
+    ],
+    "callout": {
+        "text": "COMING UP — description of upcoming focus area"
+    },
+    "timeline": [
+        {"phase": "Phase 1", "focus": "...", "dates": "Completed", "outcome": "..."}
+    ],
+    "blockers": ["Blocker 1", "Blocker 2"],
+    "next_steps": ["Step 1", "Step 2"],
+    "pull_requests": {
+        "date_range_label": "3/4 – 3/18",
+        "items": ["PR #269: Description", "PR #270: Description"]
+    }
+}
+
+Branding defaults (used when "branding" is absent or a field is missing):
+    primary_color:  2E7D32  (Emergent green)
+    accent_color:   1565C0  (Emergent blue)
+    light_color:    E8F5E9  (light green)
+    project_name:   "Status Report"
+    footer_text:    "Status Report • Emergent Software • Confidential"
+"""
+
+import json
+import sys
+from pathlib import Path
+
+from docx import Document
+from docx.shared import Pt, Inches, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.oxml.ns import qn, nsdecls
+from docx.oxml import parse_xml
+
+
+# Emergent fallback brand colors (extracted from EmergentStyles.docx)
+_EMERGENT_PRIMARY = "EE3342"   # Emergent coral/red — headings, header bar
+_EMERGENT_ACCENT = "333F4F"    # Dark navy — accent bar, title text
+_EMERGENT_LIGHT = "F9E8E9"     # Light coral tint — alternating table rows
+
+# Fixed colors independent of project branding
+CALLOUT_YELLOW = "FFF2CC"
+TEXT_COLOR = "333333"
+WHITE = "FFFFFF"
+LIGHT_DATE = "F2D4D7"
+
+# Font settings (Emergent uses Calibri Light)
+BODY_FONT = "Calibri Light"
+BODY_SIZE = 11
+BULLET_SIZE = 11
+
+
+def _resolve_brand(content: dict) -> dict:
+    """
+    Extract brand colors and labels from the JSON content's 'branding' object.
+    Falls back to Emergent defaults for any missing field.
+    """
+    b = content.get("branding") or {}
+    project_name = b.get("project_name") or "Status Report"
+    return {
+        "project_name": project_name,
+        "primary": b.get("primary_color") or _EMERGENT_PRIMARY,
+        "accent": b.get("accent_color") or _EMERGENT_ACCENT,
+        "light": b.get("light_color") or _EMERGENT_LIGHT,
+        "footer_text": b.get("footer_text") or f"{project_name} \u2022 Emergent Software \u2022 Confidential",
+    }
+
+
+def set_cell_shading(cell, color: str) -> None:
+    """Set the background shading of a table cell."""
+    shading = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{color}"/>')
+    cell._element.get_or_add_tcPr().append(shading)
+
+
+def set_cell_margins(cell, top: int = 0, bottom: int = 0, start: int = 0, end: int = 0) -> None:
+    """Set cell margins in DXA units (twentieths of a point)."""
+    tc = cell._element
+    tcPr = tc.get_or_add_tcPr()
+    tcMar = parse_xml(
+        f'<w:tcMar {nsdecls("w")}>'
+        f'  <w:top w:w="{top}" w:type="dxa"/>'
+        f'  <w:bottom w:w="{bottom}" w:type="dxa"/>'
+        f'  <w:start w:w="{start}" w:type="dxa"/>'
+        f'  <w:end w:w="{end}" w:type="dxa"/>'
+        f'</w:tcMar>'
+    )
+    tcPr.append(tcMar)
+
+
+def add_run(paragraph, text: str, font_name: str = None, font_size: float = None, bold: bool = None, color: str = None):
+    """Add a formatted run to a paragraph."""
+    run = paragraph.add_run(text)
+    if font_name:
+        run.font.name = font_name
+    if font_size:
+        run.font.size = Pt(font_size)
+    if bold is not None:
+        run.font.bold = bold
+    if color:
+        run.font.color.rgb = RGBColor.from_string(color)
+    return run
+
+
+def _remove_table_borders(table) -> None:
+    """Remove all borders from a table element."""
+    tbl = table._element
+    tblPr = tbl.tblPr if tbl.tblPr is not None else parse_xml(f'<w:tblPr {nsdecls("w")}/>')
+    borders = parse_xml(
+        f'<w:tblBorders {nsdecls("w")}>'
+        '  <w:top w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+        '  <w:left w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+        '  <w:bottom w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+        '  <w:right w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+        '  <w:insideH w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+        '  <w:insideV w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+        '</w:tblBorders>'
+    )
+    tblPr.append(borders)
+
+
+def _set_table_full_width(table) -> None:
+    """Stretch a table to 100% of the page width."""
+    tbl = table._element
+    tblPr = tbl.tblPr if tbl.tblPr is not None else parse_xml(f'<w:tblPr {nsdecls("w")}/>')
+    tblW = parse_xml(f'<w:tblW {nsdecls("w")} w:w="5000" w:type="pct"/>')
+    tblPr.append(tblW)
+
+
+def create_header(doc, date_range: str, brand: dict):
+    """Create a clean header — title on left, logo on right, thin accent line."""
+    # Use a 2-column table: left = title/subtitle/date, right = logo
+    table = doc.add_table(rows=1, cols=2)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _set_table_full_width(table)
+    _remove_table_borders(table)
+
+    # Left cell: title, subtitle, date
+    left = table.cell(0, 0)
+    set_cell_margins(left, top=0, bottom=0, start=0, end=0)
+
+    p_title = left.paragraphs[0]
+    p_title.paragraph_format.space_after = Pt(2)
+    add_run(p_title, brand["project_name"], font_name=BODY_FONT, font_size=28, bold=True, color=brand["accent"])
+
+    p_sub = left.add_paragraph()
+    p_sub.paragraph_format.space_before = Pt(0)
+    p_sub.paragraph_format.space_after = Pt(2)
+    subtitle = brand.get("report_subtitle", "Status Update")
+    add_run(p_sub, subtitle, font_name=BODY_FONT, font_size=14, color=brand["primary"])
+
+    p_date = left.add_paragraph()
+    p_date.paragraph_format.space_before = Pt(0)
+    p_date.paragraph_format.space_after = Pt(0)
+    add_run(p_date, date_range, font_name=BODY_FONT, font_size=11, color="666666")
+
+    # Right cell: logo, right-aligned
+    right = table.cell(0, 1)
+    set_cell_margins(right, top=0, bottom=0, start=0, end=0)
+
+    # Set right cell width narrower
+    tc = right._element
+    tcPr = tc.get_or_add_tcPr()
+    tcW = parse_xml(f'<w:tcW {nsdecls("w")} w:w="2500" w:type="dxa"/>')
+    tcPr.append(tcW)
+
+    logo_path = Path(__file__).parent / "emergent-logo.png"
+    p_logo = right.paragraphs[0]
+    p_logo.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    p_logo.paragraph_format.space_before = Pt(4)
+    if logo_path.exists():
+        p_logo.add_run().add_picture(str(logo_path), width=Inches(1.8))
+
+    # Thin accent line below the header table
+    line_table = doc.add_table(rows=1, cols=1)
+    _set_table_full_width(line_table)
+    line_cell = line_table.cell(0, 0)
+    run = line_cell.paragraphs[0].add_run("")
+    run.font.size = Pt(1)
+    tbl = line_table._element
+    tblPr = tbl.tblPr if tbl.tblPr is not None else parse_xml(f'<w:tblPr {nsdecls("w")}/>')
+    borders = parse_xml(
+        f'<w:tblBorders {nsdecls("w")}>'
+        '  <w:top w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+        '  <w:left w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+        f'  <w:bottom w:val="single" w:sz="12" w:space="0" w:color="{brand["primary"]}"/>'
+        '  <w:right w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+        '  <w:insideH w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+        '  <w:insideV w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+        '</w:tblBorders>'
+    )
+    tblPr.append(borders)
+
+
+def create_callout_table(doc, text: str):
+    """Create a yellow callout box."""
+    table = doc.add_table(rows=1, cols=1)
+    cell = table.cell(0, 0)
+    set_cell_shading(cell, CALLOUT_YELLOW)
+    set_cell_margins(cell, top=100, bottom=100, start=150, end=150)
+    p = cell.paragraphs[0]
+
+    # Bold the prefix up to the first colon or em-dash
+    split_char = None
+    if ":" in text:
+        split_char = ":"
+    elif "\u2014" in text:
+        split_char = "\u2014"
+
+    if split_char:
+        prefix, rest = text.split(split_char, 1)
+        add_run(p, prefix + split_char, bold=True, font_size=BODY_SIZE, color=TEXT_COLOR)
+        add_run(p, rest, font_size=BODY_SIZE, color=TEXT_COLOR)
+    else:
+        add_run(p, text, font_size=BODY_SIZE, color=TEXT_COLOR)
+
+    _set_table_full_width(table)
+    return table
+
+
+def create_timeline_table(doc, phases: list, brand: dict):
+    """Create the schedule/timeline table with branded header row."""
+    cols = ["Phase", "Focus", "Target Dates", "Outcome"]
+    table = doc.add_table(rows=1 + len(phases), cols=4)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _set_table_full_width(table)
+
+    # Header row
+    for ci, col_name in enumerate(cols):
+        cell = table.cell(0, ci)
+        set_cell_shading(cell, brand["primary"])
+        p = cell.paragraphs[0]
+        add_run(p, col_name, bold=True, font_size=10, color=WHITE)
+
+    # Data rows with alternating shading
+    for ri, phase in enumerate(phases):
+        values = [
+            phase.get("phase", ""),
+            phase.get("focus", ""),
+            phase.get("dates", ""),
+            phase.get("outcome", ""),
+        ]
+        for ci, val in enumerate(values):
+            cell = table.cell(ri + 1, ci)
+            if ri % 2 == 1:
+                set_cell_shading(cell, brand["light"])
+            add_run(cell.paragraphs[0], val, font_size=10, color=TEXT_COLOR)
+
+    return table
+
+
+def create_footer_table(doc, brand: dict):
+    """Create the branded footer bar."""
+    table = doc.add_table(rows=1, cols=1)
+    cell = table.cell(0, 0)
+    set_cell_shading(cell, brand["primary"])
+    set_cell_margins(cell, top=60, bottom=60, start=150, end=150)
+    p = cell.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    add_run(p, brand["footer_text"], font_size=8, color=WHITE)
+    _set_table_full_width(table)
+    return table
+
+
+def _set_header_row_repeat(table):
+    """Set the first row of a table to repeat as header across pages."""
+    row = table.rows[0]
+    trPr = row._element.get_or_add_trPr()
+    trPr.append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+
+
+def _style_header_row(table, cols: list, brand: dict, right_align_from: int = 1):
+    """Style a header row with thin bottom border and colored text — no solid fill."""
+    for ci, col_name in enumerate(cols):
+        cell = table.cell(0, ci)
+        set_cell_margins(cell, top=40, bottom=40, start=80, end=80)
+        # Thin bottom border in primary color
+        tc = cell._element
+        tcPr = tc.get_or_add_tcPr()
+        tcBorders = parse_xml(
+            f'<w:tcBorders {nsdecls("w")}>'
+            f'  <w:bottom w:val="single" w:sz="8" w:space="0" w:color="{brand["primary"]}"/>'
+            '</w:tcBorders>'
+        )
+        tcPr.append(tcBorders)
+        p = cell.paragraphs[0]
+        if ci >= right_align_from:
+            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        add_run(p, col_name, bold=True, font_size=10, color=brand["primary"], font_name=BODY_FONT)
+    _set_header_row_repeat(table)
+
+
+def _style_totals_row(table, row_idx: int, values: list, brand: dict, right_align_from: int = 1):
+    """Style a totals row with top border and bold primary-colored text — no solid fill."""
+    for ci, val in enumerate(values):
+        cell = table.cell(row_idx, ci)
+        set_cell_margins(cell, top=40, bottom=40, start=80, end=80)
+        # Thin top border
+        tc = cell._element
+        tcPr = tc.get_or_add_tcPr()
+        tcBorders = parse_xml(
+            f'<w:tcBorders {nsdecls("w")}>'
+            f'  <w:top w:val="single" w:sz="8" w:space="0" w:color="{brand["primary"]}"/>'
+            '</w:tcBorders>'
+        )
+        tcPr.append(tcBorders)
+        p = cell.paragraphs[0]
+        if ci >= right_align_from:
+            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        add_run(p, str(val), font_size=10, color=brand["primary"], font_name=BODY_FONT, bold=True)
+
+
+def create_epic_summary_table(doc, epics: list, brand: dict):
+    """Create a table showing Epic-level completion with % progress and totals row."""
+    cols = ["Epic", "Done", "Total", "% Complete"]
+    table = doc.add_table(rows=2 + len(epics), cols=4)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _set_table_full_width(table)
+    _remove_table_borders(table)
+
+    _style_header_row(table, cols, brand)
+
+    # Data rows with alternating shading
+    sum_done = 0
+    sum_total = 0
+    for ri, epic in enumerate(epics):
+        done = epic.get("done", 0)
+        total = epic.get("total", 0)
+        pct = epic.get("pct", 0)
+        sum_done += done
+        sum_total += total
+        pct_str = f"{pct}%"
+        values = [epic.get("epic", ""), str(done), str(total), pct_str]
+        for ci, val in enumerate(values):
+            cell = table.cell(ri + 1, ci)
+            set_cell_margins(cell, top=40, bottom=40, start=80, end=80)
+            if ri % 2 == 1:
+                set_cell_shading(cell, brand["light"])
+            p = cell.paragraphs[0]
+            if ci >= 1:
+                p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            if ci == 3:
+                clr = brand["primary"] if pct == 100 else TEXT_COLOR
+                add_run(p, val, font_size=10, color=clr, font_name=BODY_FONT, bold=(pct == 100))
+            else:
+                add_run(p, val, font_size=10, color=TEXT_COLOR, font_name=BODY_FONT)
+
+    # Totals row
+    total_row = len(epics) + 1
+    overall_pct = (sum_done * 100 // sum_total) if sum_total > 0 else 0
+    _style_totals_row(table, total_row, ["Project Total", str(sum_done), str(sum_total), f"{overall_pct}%"], brand)
+
+    return table
+
+
+def create_velocity_table(doc, velocity: dict, brand: dict):
+    """Create a velocity metrics table showing this period vs overall with trend."""
+    cols = ["Metric", "This Period", "Project Avg", "Trend"]
+    rows_data = velocity.get("rows", [])
+    has_totals = bool(velocity.get("totals"))
+    table = doc.add_table(rows=1 + len(rows_data) + (1 if has_totals else 0), cols=4)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _set_table_full_width(table)
+    _remove_table_borders(table)
+
+    _style_header_row(table, cols, brand, right_align_from=1)
+
+    # Data rows
+    for ri, row in enumerate(rows_data):
+        trend = row.get("trend", "")
+        values = [row.get("metric", ""), row.get("period", ""), row.get("overall", ""), trend]
+        for ci, val in enumerate(values):
+            cell = table.cell(ri + 1, ci)
+            set_cell_margins(cell, top=40, bottom=40, start=80, end=80)
+            if ri % 2 == 1:
+                set_cell_shading(cell, brand["light"])
+            p = cell.paragraphs[0]
+            if ci >= 1:
+                p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            if ci == 3 and val.startswith("\u25b2"):
+                add_run(p, val, font_size=10, color="2E7D32", font_name=BODY_FONT)
+            elif ci == 3 and val.startswith("\u25bc"):
+                add_run(p, val, font_size=10, color=brand["primary"], font_name=BODY_FONT)
+            else:
+                add_run(p, str(val), font_size=10, color=TEXT_COLOR, font_name=BODY_FONT)
+
+    # Totals row
+    if velocity.get("totals"):
+        t = velocity["totals"]
+        total_row = len(rows_data) + 1
+        _style_totals_row(table, total_row,
+                          [t.get("metric", "Total"), t.get("period", ""), t.get("overall", ""), t.get("trend", "")],
+                          brand, right_align_from=1)
+
+    return table
+
+
+def _velocity_trend(period_vel: float, project_vel: float) -> str:
+    """Calculate a velocity trend indicator comparing period to project average."""
+    if project_vel == 0:
+        return "\u25b2 New" if period_vel > 0 else "\u2014"
+    pct_change = ((period_vel - project_vel) / project_vel) * 100
+    if pct_change > 20:
+        return f"\u25b2 +{pct_change:.0f}%"
+    elif pct_change > 0:
+        return f"\u25b2 +{pct_change:.0f}%"
+    elif pct_change > -20:
+        return f"\u25bc {pct_change:.0f}%"
+    else:
+        return f"\u25bc {pct_change:.0f}%"
+
+
+def create_developer_stats_table(doc, devs: list, totals: dict, brand: dict):
+    """Create a per-developer stats table with velocity and trend."""
+    cols = ["Developer", "Period Pts", "Pts/Wk", "Proj Pts", "Avg Pts/Wk", "PRs", "Trend"]
+    table = doc.add_table(rows=2 + len(devs), cols=7)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _set_table_full_width(table)
+    _remove_table_borders(table)
+
+    proj_weeks = totals.get("project_weeks", 1) or 1
+    period_weeks = totals.get("period_weeks", 1) or 1
+
+    _style_header_row(table, cols, brand)
+
+    # Developer rows
+    for ri, dev in enumerate(devs):
+        period_pts = dev.get("period_pts", 0)
+        project_pts = dev.get("project_pts", 0)
+        period_vel = round(period_pts / period_weeks, 1)
+        project_vel = round(project_pts / proj_weeks, 1)
+        trend = _velocity_trend(period_vel, project_vel)
+        values = [
+            dev["name"],
+            str(period_pts),
+            str(period_vel),
+            str(project_pts),
+            str(project_vel),
+            str(dev.get("period_prs", 0)),
+            trend,
+        ]
+        for ci, val in enumerate(values):
+            cell = table.cell(ri + 1, ci)
+            set_cell_margins(cell, top=40, bottom=40, start=80, end=80)
+            if ri % 2 == 1:
+                set_cell_shading(cell, brand["light"])
+            p = cell.paragraphs[0]
+            if ci >= 1:
+                p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            # Color trend indicators
+            if ci == 6 and val.startswith("\u25b2"):
+                add_run(p, val, font_size=10, color="2E7D32", font_name=BODY_FONT)
+            elif ci == 6 and val.startswith("\u25bc"):
+                add_run(p, val, font_size=10, color=brand["primary"], font_name=BODY_FONT)
+            else:
+                add_run(p, val, font_size=10, color=TEXT_COLOR, font_name=BODY_FONT)
+
+    # Totals row
+    total_row = len(devs) + 1
+    period_total = totals.get("period_pts", 0)
+    project_total = totals.get("project_pts", 0)
+    total_period_vel = round(period_total / period_weeks, 1)
+    total_project_vel = round(project_total / proj_weeks, 1)
+    total_trend = _velocity_trend(total_period_vel, total_project_vel)
+    _style_totals_row(table, total_row, [
+        "Team Total",
+        str(period_total),
+        str(total_period_vel),
+        str(project_total),
+        str(total_project_vel),
+        str(totals.get("period_prs", 0)),
+        total_trend,
+    ], brand)
+
+    return table
+
+
+def _configure_styles(doc, brand: dict) -> None:
+    """Apply default font and heading styles to the document."""
+    # Normal style
+    style = doc.styles["Normal"]
+    style.font.name = BODY_FONT
+    style.font.size = Pt(BODY_SIZE)
+    style.font.color.rgb = RGBColor.from_string(TEXT_COLOR)
+
+    # Heading styles — sized for a clean, compact look
+    for level, size, sp_before, sp_after in [(1, 16, 12, 4), (2, 13, 8, 4)]:
+        h_style = doc.styles[f"Heading {level}"]
+        h_style.font.color.rgb = RGBColor.from_string(brand["primary"])
+        h_style.font.bold = True
+        h_style.font.size = Pt(size)
+        h_style.font.name = BODY_FONT
+        h_style.paragraph_format.space_before = Pt(sp_before)
+        h_style.paragraph_format.space_after = Pt(sp_after)
+
+    # List Bullet style: breathing room, hanging indent, at-least line spacing
+    bullet_style = doc.styles["List Bullet"]
+    bullet_style.font.name = BODY_FONT
+    bullet_style.font.size = Pt(BULLET_SIZE)
+    bullet_style.paragraph_format.space_before = Pt(6)
+    bullet_style.paragraph_format.space_after = Pt(6)
+    bullet_style.paragraph_format.line_spacing_rule = WD_LINE_SPACING.AT_LEAST
+    bullet_style.paragraph_format.line_spacing = Pt(14)
+    bullet_style.paragraph_format.left_indent = Inches(0.5)
+    bullet_style.paragraph_format.first_line_indent = Inches(-0.25)
+
+    # Disable "don't add space between same-style paragraphs" for bullet lists
+    pPr = bullet_style.element.get_or_add_pPr()
+    ctx_spacing = pPr.find(qn("w:contextualSpacing"))
+    if ctx_spacing is not None:
+        pPr.remove(ctx_spacing)
+    pPr.append(parse_xml(f'<w:contextualSpacing {nsdecls("w")} w:val="0"/>'))
+
+
+def generate_report(content: dict) -> str:
+    """Generate the status report document and return the output path."""
+    brand = _resolve_brand(content)
+
+    # Always start from a blank document — this ensures all built-in styles
+    # (Normal, List Bullet, Heading 1, etc.) are available
+    doc = Document()
+
+    _configure_styles(doc, brand)
+
+    # Page margins and footer
+    for section in doc.sections:
+        section.left_margin = Inches(1)
+        section.right_margin = Inches(1)
+        section.top_margin = Inches(0.8)
+        section.bottom_margin = Inches(0.8)
+
+        # Page footer — thin line + address + website
+        footer = section.footer
+        footer.is_linked_to_previous = False
+
+        # Thin line above footer text
+        p_line = footer.paragraphs[0]
+        p_line.paragraph_format.space_after = Pt(4)
+        pPr = p_line._element.get_or_add_pPr()
+        pBdr = parse_xml(
+            f'<w:pBdr {nsdecls("w")}>'
+            f'  <w:top w:val="single" w:sz="4" w:space="4" w:color="{brand["primary"]}"/>'
+            '</w:pBdr>'
+        )
+        pPr.append(pBdr)
+
+        footer_text = brand.get("footer_text", "")
+        if not footer_text:
+            footer_text = f'{brand["project_name"]} \u2022 Emergent Software \u2022 Confidential'
+        p_line.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        add_run(p_line, "2038 Ford Pkwy, Suite 439, Saint Paul, MN 55116  |  emergentsoftware.net",
+                font_name=BODY_FONT, font_size=10, color="999999")
+
+        # Page number line
+        p_page = footer.add_paragraph()
+        p_page.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p_page.paragraph_format.space_before = Pt(2)
+        run_pre = add_run(p_page, "Page ", font_name=BODY_FONT, font_size=10, color="999999")
+        # Insert PAGE field
+        fldChar1 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="begin"/>')
+        run_field = p_page.add_run()
+        run_field.font.name = BODY_FONT
+        run_field.font.size = Pt(8)
+        run_field.font.color.rgb = RGBColor.from_string("999999")
+        run_field._element.append(fldChar1)
+        instrText = parse_xml(f'<w:instrText {nsdecls("w")} xml:space="preserve"> PAGE </w:instrText>')
+        run_field2 = p_page.add_run()
+        run_field2._element.append(instrText)
+        fldChar2 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="separate"/>')
+        run_field3 = p_page.add_run()
+        run_field3._element.append(fldChar2)
+        run_field4 = p_page.add_run("1")
+        run_field4.font.size = Pt(8)
+        run_field4.font.color.rgb = RGBColor.from_string("999999")
+        fldChar3 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="end"/>')
+        run_field5 = p_page.add_run()
+        run_field5._element.append(fldChar3)
+        add_run(p_page, " of ", font_name=BODY_FONT, font_size=10, color="999999")
+        # Insert NUMPAGES field
+        fldChar4 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="begin"/>')
+        run_np1 = p_page.add_run()
+        run_np1._element.append(fldChar4)
+        instrText2 = parse_xml(f'<w:instrText {nsdecls("w")} xml:space="preserve"> NUMPAGES </w:instrText>')
+        run_np2 = p_page.add_run()
+        run_np2._element.append(instrText2)
+        fldChar5 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="separate"/>')
+        run_np3 = p_page.add_run()
+        run_np3._element.append(fldChar5)
+        run_np4 = p_page.add_run("1")
+        run_np4.font.size = Pt(8)
+        run_np4.font.color.rgb = RGBColor.from_string("999999")
+        fldChar6 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="end"/>')
+        run_np5 = p_page.add_run()
+        run_np5._element.append(fldChar6)
+
+    # Header
+    create_header(doc, content["date_range"], brand)
+
+    # Executive Summary
+    doc.add_heading("Executive Summary", level=1)
+    p = doc.add_paragraph(content["executive_summary"])
+    p.style = doc.styles["Normal"]
+
+    # Key Achievements
+    doc.add_heading("Key Achievements", level=1)
+    for section in content.get("sections", []):
+        doc.add_heading(section["heading"], level=2)
+        for item in section.get("items", []):
+            doc.add_paragraph(item, style="List Bullet")
+
+    # Callout box
+    if content.get("callout"):
+        doc.add_paragraph()
+        create_callout_table(doc, content["callout"]["text"])
+        doc.add_paragraph()
+
+    # Epic Progress table
+    if content.get("epic_summary"):
+        doc.add_heading("Epic Progress", level=1)
+        create_epic_summary_table(doc, content["epic_summary"], brand)
+
+    # Remaining work discussion
+    if content.get("remaining_work"):
+        doc.add_heading("Remaining Work", level=2)
+        for item in content["remaining_work"]:
+            doc.add_paragraph(item, style="List Bullet")
+
+    # Velocity
+    if content.get("velocity"):
+        doc.add_heading("Velocity", level=1)
+        create_velocity_table(doc, content["velocity"], brand)
+        if content["velocity"].get("summary"):
+            doc.add_paragraph()
+            for item in content["velocity"]["summary"] if isinstance(content["velocity"]["summary"], list) else [content["velocity"]["summary"]]:
+                doc.add_paragraph(item, style="List Bullet")
+
+    # Developer Stats
+    if content.get("developer_stats"):
+        doc.add_heading("Developer Metrics", level=1)
+        totals = content.get("developer_totals", {})
+        create_developer_stats_table(doc, content["developer_stats"], totals, brand)
+        if content.get("developer_summary"):
+            doc.add_paragraph()
+            for item in content["developer_summary"] if isinstance(content["developer_summary"], list) else [content["developer_summary"]]:
+                doc.add_paragraph(item, style="List Bullet")
+
+    # Timeline / Schedule
+    if content.get("timeline"):
+        doc.add_heading("Schedule / Timeline", level=1)
+        create_timeline_table(doc, content["timeline"], brand)
+
+    # Blockers / Risks
+    doc.add_heading("Blockers / Risks", level=1)
+    for item in content.get("blockers", []):
+        doc.add_paragraph(item, style="List Bullet")
+
+    # Next Steps
+    doc.add_heading("Next Steps / Remaining Work", level=1)
+    for item in content.get("next_steps", []):
+        doc.add_paragraph(item, style="List Bullet")
+
+    # Appendix: Pull Requests
+    if content.get("pull_requests"):
+        pr_data = content["pull_requests"]
+        doc.add_heading(
+            f'Appendix A \u2014 Pull Requests Merged ({pr_data["date_range_label"]})',
+            level=1,
+        )
+        for item in pr_data.get("items", []):
+            doc.add_paragraph(item, style="List Bullet")
+
+    output_path = content["output_path"]
+    doc.save(output_path)
+    print(f"Report saved to: {output_path}")
+    return output_path
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python generate_status_report.py content.json")
+        sys.exit(1)
+
+    content_file = sys.argv[1]
+    with open(content_file, encoding="utf-8") as f:
+        loaded_content = json.load(f)
+
+    generate_report(loaded_content)
