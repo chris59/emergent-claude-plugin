@@ -1,0 +1,14 @@
+{
+  "name": "emergent-tools",
+  "description": "Emergent Software development tools",
+  "owner": {
+    "name": "Emergent Software"
+  },
+  "plugins": [
+    {
+      "name": "emergent-dev",
+      "source": "./",
+      "description": "Emergent Software development workflow plugin"
+    }
+  ]
+}

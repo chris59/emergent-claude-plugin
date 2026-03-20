@@ -1,0 +1,12 @@
+{
+  "name": "emergent-dev",
+  "description": "Emergent Software development workflow plugin — story lifecycle, quality gates, code review, and project conventions for .NET/ADO projects",
+  "version": "1.0.0",
+  "author": {
+    "name": "Emergent Software",
+    "url": "https://www.emergentsoftware.net"
+  },
+  "keywords": ["dotnet", "ado", "azure-devops", "clean-architecture", "story-workflow", "code-review"],
+  "skills": "./skills/",
+  "agents": ["./agents/implementer.md", "./agents/planner.md", "./agents/reviewer.md"]
+}
