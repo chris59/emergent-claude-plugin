@@ -432,14 +432,40 @@ These items are explicitly NOT included in this estimate. Documenting them preve
 
 ---
 
-### Step 7: Review with User
+### Step 7: Generate Professional Word Document
 
-After writing the document, present a concise summary:
+After writing the markdown estimate, generate a branded `.docx` for client presentation and approval.
+
+1. Locate `generate_status_report.py` (the shared docx engine).
+
+2. Build a JSON file mapping the estimate sections to the report structure:
+   - **Executive Summary** — total effort, timeline, confidence, key cost drivers
+   - **Sections** — one per epic/feature in the WBS, with summary paragraph + top stories
+   - **Tables** to render directly via python-docx after the base doc:
+     - **Work Breakdown Structure** — Feature / Story / Points / O/M/P / Confidence / Key Cost Drivers
+     - **Phase Breakdown** — Phase / % of Effort / Agentic Hours / Traditional Hours / Savings
+     - **Risk Assessment** — Risk / Level / Impact / Mitigation
+     - **Assumptions** — each assumption with risk-if-wrong
+     - **Confidence Summary** — Total points, timelines, savings percentage
+   - **Callout** — highlight the agentic savings percentage and timeline comparison
+   - **Sign-off block** — "Reviewed and accepted by: _____________ Date: _____"
+
+3. Use Emergent branding: coral/red headers, Calibri 11pt body, slim table styling, footer with project name.
+
+4. Output to `.claude/requirements/{slug}/{Feature Name} - Estimate.docx` and copy to `{STATUS_REPORT_OUTPUT_DIR}` if configured.
+
+5. The Word doc should be self-contained — a manager who never sees the markdown should understand the full estimate from the docx alone.
+
+### Step 8: Review with User
+
+After writing both documents, present a concise summary:
 
 ```
 ## Estimate Complete
 
-**Saved to**: .claude/requirements/{slug}/estimate.md (or .claude/estimates/{slug}.md)
+**Documents saved to**:
+- `.claude/requirements/{slug}/estimate.md` (version-controlled)
+- `.claude/requirements/{slug}/{Feature Name} - Estimate.docx` (client-facing)
 
 ### Summary
 - **Total (risk-adjusted)**: {N} points
@@ -467,7 +493,7 @@ Then ask the following, one at a time:
 1. **Does the scope look right?** Any stories that feel over- or under-scoped?
 2. **Are there stories to add or remove?** Anything the analysis missed?
 3. **Want to create the Epic/Feature/Story hierarchy in ADO?** I can hand this off to `/create-story` with the estimate data pre-populated.
-4. **Want a Word document version?** I can generate a client-presentable estimate doc if needed.
+4. **Want to regenerate the Word document?** I can update the `.docx` if you've made changes to the estimate.
 
 If the user wants ADO items created, hand off to `/create-story` with:
 - The story title

@@ -374,14 +374,71 @@ Guidelines for the decomposition:
 - ACs in the decomposition are suggestions — they will be refined when creating the actual stories
 - If scope is too uncertain to decompose, say so and explain what needs to be resolved first
 
-### Step 5: Review with User
+### Step 5: Generate Professional Word Document
+
+After writing the markdown requirements doc, generate a branded `.docx` for client distribution and stakeholder sign-off.
+
+1. Locate `generate_status_report.py` (the shared docx engine) — same search order as the status report skill.
+
+2. Build a JSON file with this structure:
+```json
+{
+    "date_range": "{date of last update}",
+    "output_path": ".claude/requirements/{feature-slug}/{Feature Name} - Requirements.docx",
+    "branding": {
+        "project_name": "{PROJECT_NAME}"
+    },
+    "executive_summary": "Use the Context section from the requirements doc — 2-4 sentences explaining what this feature is, who it serves, and why it matters.",
+    "sections": [
+        {
+            "heading": "Functional Requirements",
+            "items": [
+                "Summary paragraph describing the category, then the top requirements listed with IDs"
+            ]
+        },
+        {
+            "heading": "Non-Functional Requirements",
+            "items": ["NFR items"]
+        },
+        {
+            "heading": "Constraints & Dependencies",
+            "items": ["Constraint items"]
+        },
+        {
+            "heading": "Assumptions",
+            "items": ["Each assumption with risk rating"]
+        }
+    ],
+    "callout": {
+        "text": "OPEN QUESTIONS — {N} questions remain unresolved and must be answered before implementation begins. See Section X."
+    }
+}
+```
+
+3. **Additional sections not handled by the shared script** — write directly using python-docx after the script generates the base:
+   - **Requirements tables** (FR/NFR) with columns: ID, Requirement, Priority, Source, Validated
+   - **Assumptions table** with columns: ID, Assumption, Risk if Wrong, Source
+   - **Clarifying Questions** — Resolved and Unresolved tables
+   - **Traceability Matrix** — Requirement → Source → Story mapping
+   - **Suggested Story Decomposition** — Story title, points, ACs
+   - **Sign-off block** at the end: "Reviewed and accepted by: _____________ Date: _____"
+
+4. Use the same table styling as the status report: slim headers with thin colored bottom border, alternating row shading, Calibri 11pt body, 10pt tables, right-aligned numeric columns.
+
+5. Output the Word doc to `.claude/requirements/{feature-slug}/{Feature Name} - Requirements.docx` and also copy to `{STATUS_REPORT_OUTPUT_DIR}` if configured.
+
+Tell the user the path to both the `.md` and `.docx` files.
+
+### Step 6: Review with User
 
 After writing the document, present a summary of findings:
 
 ```
 ## Requirements Analysis Complete
 
-**Document saved to**: `.claude/requirements/{feature-slug}/requirements.md`
+**Documents saved to**:
+- `.claude/requirements/{feature-slug}/requirements.md` (version-controlled, feeds into other skills)
+- `.claude/requirements/{feature-slug}/{Feature Name} - Requirements.docx` (client-facing, for sign-off and distribution)
 
 ### Summary
 - **Functional Requirements**: {N} identified (FR-1 through FR-{N})
