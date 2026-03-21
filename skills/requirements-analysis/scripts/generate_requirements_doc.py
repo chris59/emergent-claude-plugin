@@ -13,7 +13,7 @@ from datetime import datetime
 
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor, Cm
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.section import WD_ORIENT
 from docx.oxml.ns import qn, nsdecls
@@ -83,6 +83,27 @@ def add_run(paragraph, text, font_name="Calibri", font_size=11, bold=False, colo
     if color:
         run.font.color.rgb = rgb(color)
     return run
+
+
+def format_bullet(paragraph):
+    """Apply correct bullet paragraph formatting:
+    Left indent 0.25", Hanging 0.25", Before/After 6pt, Line spacing At Least 12pt."""
+    fmt = paragraph.paragraph_format
+    fmt.left_indent = Inches(0.25)
+    fmt.first_line_indent = Inches(-0.25)
+    fmt.space_before = Pt(6)
+    fmt.space_after = Pt(6)
+    fmt.line_spacing_rule = WD_LINE_SPACING.AT_LEAST
+    fmt.line_spacing = Pt(12)
+
+
+def add_bullet(doc, text, font_size=11):
+    """Add a properly formatted bullet paragraph."""
+    p = doc.add_paragraph(style="List Bullet")
+    p.clear()
+    add_run(p, text, font_size=font_size)
+    format_bullet(p)
+    return p
 
 
 def add_styled_table(doc, headers, rows, col_widths=None):
@@ -175,8 +196,7 @@ def add_requirement_block(doc, req):
         p = doc.add_paragraph()
         add_run(p, "Acceptance Criteria:", font_size=11, bold=True, color=BRAND_NAVY)
         for ac in req["acceptance_criteria"]:
-            ac_p = doc.add_paragraph(style="List Bullet")
-            add_run(ac_p, ac, font_size=11)
+            add_bullet(doc, ac)
 
     # Dependencies
     if req.get("dependencies"):
@@ -313,8 +333,7 @@ def generate_requirements_doc(content):
     if content.get("user_characteristics"):
         doc.add_heading("2.2 User Characteristics", level=2).runs[0].font.color.rgb = rgb(BRAND_NAVY)
         for uc in content["user_characteristics"]:
-            p = doc.add_paragraph(style="List Bullet")
-            add_run(p, uc, font_size=11)
+            add_bullet(doc, uc)
 
     doc.add_heading("2.3 Assumptions", level=2).runs[0].font.color.rgb = rgb(BRAND_NAVY)
     p = doc.add_paragraph()
@@ -331,8 +350,7 @@ def generate_requirements_doc(content):
     if content.get("constraints"):
         doc.add_heading("2.4 Constraints & Dependencies", level=2).runs[0].font.color.rgb = rgb(BRAND_NAVY)
         for c in content["constraints"]:
-            p = doc.add_paragraph(style="List Bullet")
-            add_run(p, c, font_size=11)
+            add_bullet(doc, c)
 
     doc.add_page_break()
 
@@ -432,8 +450,7 @@ def generate_requirements_doc(content):
 
         if story.get("acceptance_criteria"):
             for ac in story["acceptance_criteria"]:
-                ac_p = doc.add_paragraph(style="List Bullet")
-                add_run(ac_p, ac, font_size=11)
+                add_bullet(doc, ac)
         doc.add_paragraph()
 
     # Summary table
