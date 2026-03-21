@@ -140,14 +140,17 @@ For each requirement:
 - State it as a clear, testable behavior (not an implementation choice)
 - Identify which domain entities or processes are involved (use terms from `project.domains.md` if available)
 - **Citation (MANDATORY)**: Every requirement MUST cite its origin. Use the format `[Source: {origin}]`. Origins include:
-  - `[Source: Client — meeting 2026-03-20]` — requirement came directly from the client
-  - `[Source: Client — email from {name}, 2026-03-15]` — client communication
-  - `[Source: Stakeholder — {name}, verbal]` — stakeholder direction
-  - `[Source: Design — Figma {screen name}]` — derived from a design artifact
-  - `[Source: Dev — {name}, technical analysis]` — developer-identified requirement (infrastructure, security, etc.)
-  - `[Source: Manager — {name}, scope decision]` — management direction
-  - `[Source: Inferred — {basis}]` — not explicitly stated but reasonably inferred from other requirements
-  - `[Source: Regulation — {standard}]` — compliance or regulatory requirement
+  - `[Source: Client — {person name}, Sprint Planning meeting, 2026-03-20]` — requirement came directly from the client; include WHO said it, WHICH meeting, and WHEN
+  - `[Source: Client — {person name}, email re: "{subject line}", 2026-03-15]` — client communication; include sender, subject, and date
+  - `[Source: Client — {person name}, "{document title}" p.{N}, 2026-03-10]` — from a client-provided document; include author, document name, and page/section if applicable
+  - `[Source: Stakeholder — {person name}, {context}, verbal]` — stakeholder direction; include who and the conversation context
+  - `[Source: Design — Figma "{screen/component name}", {designer name}]` — derived from a design artifact; include which screen and who created it
+  - `[Source: Dev — {person name}, technical analysis of {area}]` — developer-identified requirement; include who and what they analyzed
+  - `[Source: Manager — {person name}, scope decision in {context}]` — management direction; include who and when/where the decision was made
+  - `[Source: Inferred — based on {FR-N} and {domain constraint}]` — not explicitly stated; cite WHAT it was inferred from so it can be validated
+  - `[Source: Regulation — {standard name and section, e.g., "WCAG 2.1 AA §1.4.3"}]` — compliance or regulatory; cite the specific standard and clause
+
+  **Be as specific as possible.** "Client meeting" is not enough — "John Smith, SAP Integration kickoff meeting, 2026-03-20" lets someone trace the requirement back to the exact conversation. If you don't know who said it, note that: "Unknown attendee, Sprint Review meeting, 2026-03-20 — needs attribution."
 - Requirements without client origin should be flagged for validation — they may be valid (security hardening, accessibility) but the team should consciously decide to include them
 - Assign a temporary label: FR-1, FR-2, ...
 
@@ -257,12 +260,13 @@ Write the document to `.claude/requirements/{feature-slug}/requirements.md`:
 
 ## Sources
 
-| ID | Type | Description | Date | Location |
-|----|------|-------------|------|----------|
-| S1 | Meeting notes | {description} | {date} | `.claude/requirements/{slug}/sources/meeting-{date}.md` |
-| S2 | Email | From {person} re: {subject} | {date} | `.claude/requirements/{slug}/sources/email-{date}.md` |
-| S3 | Design | Figma — {screen/component} | {date} | {Figma URL or screenshot path} |
-| S4 | Document | {document name} | {date} | {file path} |
+| ID | Type | Description | Who | Date | Location |
+|----|------|-------------|-----|------|----------|
+| S1 | Meeting | Sprint Planning — SAP integration discussion | John Smith (client), Chris Adam | 2026-03-20 | `sources/meeting-sprint-planning-2026-03-20.md` |
+| S2 | Email | Re: "Dealer forecast requirements" | Jane Doe (client) → Chris Adam | 2026-03-15 | `sources/email-jane-doe-2026-03-15.md` |
+| S3 | Design | Figma — Dealer Forecast Card | Sarah (designer) | 2026-03-12 | `sources/figma-dealer-forecast-card.md` |
+| S4 | Document | "Honda AIM Allocation Rules v2.pdf" | Mahesh Yadav (client) | 2026-03-01 | `sources/honda-allocation-rules-v2-summary.md` |
+| S5 | Transcript | Teams recording — requirements walkthrough | Multiple attendees | 2026-03-18 | `sources/transcript-requirements-walkthrough-2026-03-18.md` |
 
 **Important**: Save all raw source material into `.claude/requirements/{slug}/sources/` so it can be searched and referenced later. Meeting transcripts, emails, and notes should be saved as markdown files. Screenshots and images should be copied as-is.
 
