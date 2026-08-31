@@ -6,7 +6,19 @@
     "name": "Emergent Software",
     "url": "https://www.emergentsoftware.net"
   },
-  "keywords": ["dotnet", "ado", "azure-devops", "clean-architecture", "story-workflow", "code-review"],
+  "keywords": [
+    "dotnet",
+    "ado",
+    "azure-devops",
+    "clean-architecture",
+    "story-workflow",
+    "code-review"
+  ],
   "skills": "./skills/",
-  "agents": ["./agents/implementer.md", "./agents/planner.md", "./agents/reviewer.md"]
+  "agents": [
+    "./agents/implementer.md",
+    "./agents/planner.md",
+    "./agents/reviewer.md",
+    "./agents/ac-verifier.md"
+  ]
 }

@@ -228,7 +228,34 @@ Produce your review in this exact structure:
 7. **Check completeness** — Missing registrations (DI, routes, nav tabs).
 8. **Produce the report** — Use the exact output format from Section 7.
 
-# 9) Rules
+# 9) Deep Review Mode (multi-agent, opt-in)
+
+Single-pass review over a whole diff anchors on the first things it notices and emits plausible-but-wrong
+findings that make the review noisy. For large or high-risk changes, the *orchestrator* (the
+`start-story` / `close-story` skill, or a `Workflow`) runs review as fan-out + adversarial verification.
+This is OPT-IN (`--deep-review`, or auto-*suggested* — not auto-run — for diffs over ~15 files); a normal
+review is the single-pass flow above.
+
+The recipe the orchestrator follows:
+
+1. **Fan out by dimension** — one reviewer invocation per lens, each scoped to its concern only:
+   `architecture` (§2), `security` (§3), `correctness`/async/error-handling (§5), and `domain-rules`
+   (§4, from `project.domains.md`). Each returns structured findings (severity, file:line, why, fix).
+2. **Dedup across dimensions** (a real barrier — needs all findings together) so the same line isn't
+   reported by two lenses.
+3. **Adversarially verify each Critical/Major** — spawn N skeptics (default 3) prompted to REFUTE the
+   finding, defaulting to "refuted" when uncertain. A finding SURVIVES only if it is not refuted by the
+   majority. Where a finding could fail in more than one way, give skeptics distinct angles (does it
+   actually reproduce? is it really reachable? is the "fix" a no-op?).
+4. **Only surviving findings** populate the Critical/Major sections of the §7 report. Refuted ones are
+   dropped (optionally listed under a "considered & dismissed" note). Minor/Suggestion findings skip the
+   verify pass — they don't block.
+
+When invoked as a single dimension (orchestrated), stay strictly in your lens and return structured
+findings, not the full §7 report — the orchestrator assembles the final report. When invoked normally
+(no orchestration), produce the full §7 report as usual.
+
+# 10) Rules
 
 - Be thorough but fair. Flag real issues, not style preferences.
 - Distinguish between critical (must fix), warnings (should fix), and suggestions (nice to have).

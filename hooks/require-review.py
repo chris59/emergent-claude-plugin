@@ -52,14 +52,39 @@ def main():
     # Release/integration branches don't need a story-level review stamp —
     # all code merged into them was already reviewed via individual PRs.
     EXEMPT_BRANCHES = {"main", "develop", "release/uat", "release/2026-02-10"}
-    if branch in EXEMPT_BRANCHES or branch.startswith("release/"):
+
+    def is_exempt(b: str) -> bool:
+        return b in EXEMPT_BRANCHES or b.startswith("release/")
+
+    # Check the PUSH TARGET REF first, not just the current branch.
+    # Pattern matches: `git push origin release/uat`, `git push origin HEAD:release/uat`,
+    # `git push origin develop:release/uat`. The destination ref is what gets the
+    # commits — that's what the exemption should key off of.
+    # /release uat ff-pushes release/uat from whatever branch is checked out
+    # (could be a deleted feature branch with stale local HEAD), so the
+    # current-branch check below is the wrong gate for that case.
+    target_match = re.search(
+        r'git push(?:\s+--?\S+)*\s+\S+\s+(?:[^:\s]+:)?(\S+)',
+        command,
+    )
+    if target_match:
+        target_ref = target_match.group(1)
+        # Strip refs/heads/ prefix if present
+        target_ref = re.sub(r'^refs/heads/', '', target_ref)
+        if is_exempt(target_ref):
+            sys.exit(0)
+
+    if is_exempt(branch):
         sys.exit(0)
 
-    # Get upstream ref to diff against
+    # Diff base = merge-base with origin/develop, NOT @{upstream}. After a rebase, @{upstream}
+    # still points at the pre-rebase remote tip, so its diff (and thus the diff-hash) won't match
+    # the stamp that stamp-review.sh wrote against the merge-base. Keep both scripts on the same
+    # base so a stamp made post-rebase actually satisfies this gate. Fall back to @{upstream}.
     upstream = None
     try:
         upstream = subprocess.check_output(
-            ["git", "-C", project_dir, "rev-parse", "@{upstream}"],
+            ["git", "-C", project_dir, "merge-base", "HEAD", "origin/develop"],
             text=True, stderr=subprocess.DEVNULL
         ).strip()
     except Exception:
@@ -68,11 +93,11 @@ def main():
     if not upstream:
         try:
             upstream = subprocess.check_output(
-                ["git", "-C", project_dir, "rev-parse", "origin/develop"],
+                ["git", "-C", project_dir, "rev-parse", "@{upstream}"],
                 text=True, stderr=subprocess.DEVNULL
             ).strip()
         except Exception:
-            sys.exit(0)  # Can't determine upstream, allow
+            sys.exit(0)  # Can't determine diff base, allow
 
     # Compute diff hash (use raw bytes to match md5sum in stamp-review.sh)
     try:

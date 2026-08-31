@@ -12,6 +12,10 @@ Ship a completed story: verify every AC was met, detect scope creep, get user ap
 ## Arguments
 
 - `1279` or `#1279` — the ADO work item ID (required)
+- `--deep-review` — before the approval gate, run the multi-agent fan-out + adversarial-verify
+  self-review (the `reviewer` agent's Deep Review Mode, §9) instead of relying solely on the ADO AI
+  review. Useful when closing a large/high-risk branch directly without having gone through
+  `/start-story`'s pre-PR self-review gate.
 
 ## Instructions
 
@@ -38,7 +42,7 @@ From `.claude/project.testing.md` (optional):
 - `{DB_BUILD_CMD}` — database build command (skip Step 4 DB sub-step if not defined)
 
 From `.claude/project.team.md` (optional):
-- `{MERGE_STRATEGY}` — PR merge strategy (default: `squash`)
+- `{MERGE_STRATEGY}` — PR merge strategy (default: `rebase` — linear history; "Rebase and fast-forward")
 
 Configure az defaults:
 ```bash
@@ -64,26 +68,45 @@ az devops configure --defaults organization={ADO_ORG} project="{ADO_PROJECT}"
    ```
    If on `develop` or `main`, **STOP** — cannot close a story without a feature branch.
 
-### Step 2: AC Verification Checklist
+### Step 2: AC Verification — dispatch the verifier (do NOT self-grade)
 
-Map every acceptance criterion to what was implemented. Read the changed files to understand what was done.
-
-```bash
-git diff develop --name-only
-```
-
-Present a checklist to the user:
+**The session that wrote the code does not rule on whether it is finished.** Dispatch the
+`ac-verifier` agent, fresh context, and relay its verdict. Mapping the ACs yourself here is the
+failure this step exists to prevent — you already believe the work is done, so you will read each
+criterion as a description of what you built.
 
 ```
-Acceptance Criteria Verification:
-  ✅ AC1: {AC text} — {what was implemented and where}
-  ✅ AC2: {AC text} — {what was implemented and where}
-  ⚠️  AC3: {AC text} — {implemented but lacks test coverage}
-  ❌ AC4: {AC text} — {not yet implemented}
+Agent(subagent_type: "ac-verifier", model: "opus", prompt: """
+WORK ITEM: #{id} — {title}
+TYPE: {Bug|Story}
+BASE: develop
+PLAN: {plan path, if one exists}
+
+ACCEPTANCE CRITERIA (verbatim):
+{the ACs, numbered, exactly as written on the work item}
+
+IMPLEMENTER'S REPORT (a claim to test, not a finding to relay):
+{what the implementation reported, including anything it tried and abandoned}
+""")
 ```
 
-- If ANY AC is ❌, flag it. Use **AskUserQuestion**: "AC4 is not implemented. Skip it (defer to follow-up story) or implement now?"
-- If any AC is ⚠️, note it but don't block.
+Relay its table as-is. Its verdict is mechanical and **you never round it up**:
+
+| Verifier verdict | What happens |
+|---|---|
+| `COMPLETE` (every AC `MET`) | proceed to Step 3 |
+| `SHORT` (any `PARTIAL` or `NOT MET`) | **re-plan the remainder — do not ship with a caveat** |
+
+**A shortfall is not a question for the user and not a footnote in the PR.** Writing the gap into
+the PR body does not close it; it moves the decision onto the reviewer after the work is merged and
+hard to unwind. Take the verifier's `REGROUP BRIEF` back to planning, implement the delta, and
+re-verify. Budget two regroup cycles.
+
+When the budget is exhausted, that IS a stop point — and the three options are genuinely the user's:
+keep going on a fresh plan, amend the criterion, or park the story. **Amending or descoping an
+acceptance criterion is never your call.**
+
+If the verifier cannot run at all, the story **holds here**. An unavailable verifier is not a pass.
 
 ### Step 3: Scope Creep Detection
 
@@ -125,6 +148,11 @@ Run in sequence — each must pass before proceeding:
 If any step fails, fix the issue and re-run. Do NOT proceed with failures.
 
 ### Step 5: User Approval Gate
+
+**If `--deep-review` was passed**: first run the fan-out + adversarial-verify self-review from the
+`reviewer` agent's Deep Review Mode (§9) over the branch diff vs develop — ideally as a `Workflow`. Fold
+any surviving Critical/Major findings into the summary below (and fix them before approval). This is a
+local pre-PR gate; the ADO AI review at Step 8 still runs regardless.
 
 Present a summary and ask for approval:
 
@@ -200,65 +228,46 @@ EOF
 
 Extract the PR ID from the response.
 
-**Check for merge conflicts immediately:**
-```bash
-token=$(az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv 2>/dev/null)
-curl -s -H "Authorization: Bearer $token" \
-  "{ADO_ORG}/{ADO_PROJECT_ENCODED}/_apis/git/repositories/{ADO_REPO_ID}/pullrequests/{prId}?api-version=7.0" \
-  | python -c "import sys,json; pr=json.load(sys.stdin); print(pr.get('mergeStatus','?'))"
-```
+**Check for merge conflicts immediately** via `mcp__azure-devops__repo_get_pull_request_by_id`
+(`repositoryId: {ADO_REPO_ID}`, `pullRequestId: {prId}`) — read `mergeStatus`. (Clean JSON, no
+cp1252/curl encoding issues.)
 If `conflicts`: rebase, stamp, force-push, re-check.
 
 ### Step 8: Poll Build & AI Review
 
-**Run polling as background tasks.**
+> **🚨 POLL VIA MCP TOOLS — NOT curl/az-rest/python loops.**
+> The `curl ... | python` and `az rest ... | python` poll loops below this note are
+> BROKEN on Windows (cp1252 mangles the JSON → python gets empty stdin → the loop's
+> completion check NEVER fires → silent infinite wait). If you use them you will hang
+> until the human notices the build/review is done — which is a failure of your job to
+> shepherd the PR to completion. Use the MCP path instead.
+>
+> **It is YOUR job to drive the PR to done (auto-complete set, work item closed) without
+> the human having to notice "it's done."** Do not stop at "I started polling."
 
-1. **Poll for build completion** (background, up to 10 minutes):
-   ```bash
-   token=$(az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv 2>/dev/null)
-   for i in $(seq 1 40); do
-     result=$(curl -s -H "Authorization: Bearer $token" \
-       "{ADO_ORG}/{ADO_PROJECT_ENCODED}/_apis/build/builds?\$top=10&api-version=7.0" \
-       | python -c "
-   import sys,json
-   builds=json.load(sys.stdin)['value']
-   target=[b for b in builds if b.get('sourceBranch')=='refs/pull/{prId}/merge']
-   if target:
-       b=target[0]
-       print(b['id'], b['status'], b.get('result',''))
-   else:
-       print('no-build-yet')
-   " 2>/dev/null)
-     echo "[$i] $result"
-     if echo "$result" | grep -q "completed"; then echo "BUILD_DONE: $result"; break; fi
-     sleep 15
-   done
-   ```
+**Reliable polling (use this):**
 
-2. **Poll for AI review** (background, after build completes):
-   ```bash
-   for i in $(seq 1 20); do
-     result=$(curl -s -H "Authorization: Bearer $token" \
-       "{ADO_ORG}/{ADO_PROJECT_ENCODED}/_apis/git/repositories/{ADO_REPO_ID}/pullrequests/{prId}/threads?api-version=7.0" \
-       | python -c "
-   import sys,json
-   threads=json.load(sys.stdin)['value']
-   reviews=[]
-   for t in threads:
-       for c in t.get('comments',[]):
-           content=c.get('content','')
-           if 'AI Code Review' in content:
-               reviews.append((c.get('publishedDate',''), content))
-   reviews.sort()
-   print(reviews[-1][1][:100] if reviews else 'not-found')
-   " 2>/dev/null)
-     echo "[$i] ${result:0:60}"
-     if [ "$result" != "not-found" ]; then echo "FOUND"; break; fi
-     sleep 15
-   done
-   ```
+1. **Build status** — `mcp__azure-devops__pipelines_get_builds` with
+   `branchName: "refs/pull/{prId}/merge"` (or `pipelines_get_build_status` once you have the
+   build id). Clean JSON, no encoding issues. `status: 1` = in progress, `2` = completed;
+   read `result` for success/failure. If no build appears after a few checks, the PR-policy
+   build may not have auto-triggered — queue it (`pipelines_run_pipeline`) or check PR policies.
 
-3. **Parse findings**: Count Critical and Major issues from the review.
+2. **AI review thread** — `mcp__azure-devops__repo_list_pull_request_threads`
+   (`repositoryId: {ADO_REPO_ID}`, `project: {ADO_PROJECT}`). Find the thread whose comment
+   `content` contains `AI Code Review` (author is the build service). Parse `#### Critical Issues`
+   and `#### Major Issues` — each `- **[` line is one finding.
+
+3. **Drive the wait with `ScheduleWakeup`, NOT a bash sleep loop.** After pushing the PR,
+   schedule a wakeup (~150s while a build is actively running — CI here takes a few minutes)
+   that re-invokes you to re-check via the MCP tools above. Keep re-scheduling until: build
+   completed AND review parsed AND (clean → auto-complete set + work item closed) OR
+   (findings → fixed, pushed, re-poll). The wakeup re-invokes you automatically, so there is
+   no silent hang and no dependence on the human noticing. Only stop scheduling when the work
+   is truly done or you genuinely need a human decision.
+
+4. **Parse findings**: Count Critical and Major issues from the review (gate: any Critical OR
+   >5 Major blocks; but fix/log ALL Major before auto-complete).
 
 ### Step 9: Fix AI Review Issues
 
@@ -287,15 +296,14 @@ For each Critical and Major finding, triage:
 
 ### Step 10: Set Auto-Complete
 
-Once the latest AI review shows 0 Critical AND 0 Major (or all remaining are logged false positives):
+Once the latest AI review shows 0 Critical AND 0 Major (or all remaining are logged false positives),
+set auto-complete via `mcp__azure-devops__repo_update_pull_request` (`repositoryId: {ADO_REPO_ID}`,
+`pullRequestId: {prId}`) — set `autoCompleteSetBy` to your own identity (resolve via
+`mcp__azure-devops__core_get_identity_ids` if you don't have it) and `completionOptions` to
+`{mergeStrategy: "{MERGE_STRATEGY}", deleteSourceBranch: true}`.
 
-```bash
-token=$(az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv 2>/dev/null)
-myId=$(curl -s -H "Authorization: Bearer $token" "{ADO_ORG}/_apis/connectionData" | python -c "import sys,json; print(json.load(sys.stdin)['authenticatedUser']['id'])")
-curl -s -X PATCH -H "Authorization: Bearer $token" -H "Content-Type: application/json" \
-  "{ADO_ORG}/{ADO_PROJECT_ENCODED}/_apis/git/repositories/{ADO_REPO_ID}/pullrequests/{prId}?api-version=7.0" \
-  -d "{\"autoCompleteSetBy\":{\"id\":\"$myId\"},\"completionOptions\":{\"mergeStrategy\":\"{MERGE_STRATEGY}\",\"deleteSourceBranch\":true}}"
-```
+If the MCP tool doesn't expose `autoCompleteSetBy`, fall back to a single (non-loop) `az repos pr update`
+— never a curl/python pipe, which mangles JSON on cp1252.
 
 ### Step 11: Close Work Item
 
@@ -318,12 +326,92 @@ HTMLEOF
 
 **For Bugs** — set state to `Closed` with root cause + fix details.
 
-### Step 12: Cleanup
+### Step 11.5: Record Process Metrics
 
-1. Verify PR merged (check `status=completed`)
-2. `git checkout develop && git pull origin develop`
-3. `git branch -d {branch}` (or `-D` for squash-merged branches)
-4. Confirm to user: "Story #{id} closed. Switched to develop."
+Append ONE line to `.claude/process-metrics.jsonl` (create the file if missing) capturing how this story
+actually went — so `/emergent-dev:process-report` can later show which gates earn their cost. This is
+fire-and-forget telemetry; never block the close on it.
+
+Write a single JSON object (one line, no pretty-print) with these fields:
+```json
+{"event":"close","storyId":{id},"type":"{Story|Bug}","points":{points},
+ "acTotal":{n},"acMet":{n},"acWarnings":{n},
+ "scopeCreepFiles":{n},"aiReviewIterations":{n},
+ "reworkAfterApproval":{true|false},"ts":"{ISO-8601 timestamp}"}
+```
+- `acWarnings` = count of ⚠️ ACs from Step 2; `scopeCreepFiles` = files flagged in Step 3 with no AC.
+- `aiReviewIterations` = number of fix-push cycles in Step 9 (0 if review was clean first pass).
+- `reworkAfterApproval` = did the user report issues at the Step 5 gate after first approving? (proxy for
+  "local approval was premature").
+- Stamp `ts` from `date -u +%Y-%m-%dT%H:%M:%SZ` (Bash) — do not invent a time.
+
+Append safely (don't clobber prior lines):
+```bash
+echo '{...json...}' >> .claude/process-metrics.jsonl
+```
+`.claude/process-metrics.jsonl` is local telemetry — add it to `.gitignore` if it isn't already.
+
+### Step 11.6: Promote a Learning (close the knowledge loop)
+
+Knowledge from a story tends to die in session memory or get re-discovered later. Before cleanup, decide
+whether anything learned this story is a **durable fact worth persisting** — and route it to where it'll
+actually be re-read, not just to session memory.
+
+Consider: a non-obvious gotcha hit during implementation, a correction to a stale assumption, a project
+fact not derivable from the code, a recurring failure and its fix.
+
+If there's nothing durable (most small stories), skip silently — do NOT manufacture a "learning."
+
+If there IS something, use **AskUserQuestion** to confirm it's worth keeping and route by type:
+
+| Type of learning | Destination |
+|------------------|-------------|
+| **Operational gotcha** reusable across stories (CLI flag, API quirk, env trap) | the relevant skill's comment or a `reference/*.md` doc in the plugin |
+| **Project fact** (topology, naming, a hard rule) not in the code | the matching `.claude/project.*.md` convention file |
+| **Correction** of an existing note/doc that turned out wrong | edit the note AT ITS SOURCE — don't just add a contradicting one (the failure mode this step exists to prevent) |
+| **Session/ongoing-work state** only | project memory (`MEMORY.md` + topic file) per the memory rules |
+
+The bias is toward the durable destinations (skill/reference/project file) over session memory, because
+those feed the next run automatically via the shared preamble. Always confirm before editing a shared
+plugin file or convention file.
+
+### Step 12: Cleanup — tear the worktree down
+
+Capture both values **while still inside the worktree**, before leaving it:
+
+```bash
+STORY_BRANCH="$(git branch --show-current)"
+MAIN_ROOT="$(git rev-parse --git-common-dir | xargs dirname)"
+```
+
+1. **Verify the PR actually merged** (`status=completed`). Do not tear down on an open PR.
+2. **Leave the worktree**: `ExitWorktree({ action: "keep" })` — back to the main checkout.
+3. **Remove it, by BRANCH name (never the work-item id):**
+   ```bash
+   bash .claude/skills/start-story/scripts/story-worktree.sh remove "$STORY_BRANCH" --merged
+   ```
+   `--merged` lets it delete the local branch too. The script tears down the directory, prunes
+   git's worktree registry, and — because every story runs a build and MSBuild keeps file handles
+   on `bin/*.dll` — runs `dotnet build-server shutdown` and retries automatically if the first
+   delete is refused. An empty-but-pinned directory (a shell whose cwd is still inside it) is also
+   handled.
+4. **Confirm the teardown**, do not assume it:
+   ```bash
+   git worktree list          # the story worktree must be GONE
+   git status --porcelain     # main checkout, must be clean
+   ```
+   The script's own contract is `REMOVED=yes`. If it prints `REMOVED=partial`, the `REASON` line
+   names what still holds a handle — an open editor, a running API/Function host, or an Explorer
+   window. Close it and re-run; never leave a half-removed worktree behind.
+5. **Tree-clean check**: if `git status --porcelain` lists anything in the main checkout, surface it
+   with the file list and a recommendation (commit, stash, revert) BEFORE the final confirmation.
+   Do not silently leave a story closed on a dirty tree.
+6. Confirm to the user: "Story #{id} closed. Worktree removed, back on develop." plus "Tree clean"
+   or "Tree dirty — see above".
+
+**Housekeeping:** `story-worktree.sh list` classifies every worktree and names abandoned ones
+(`safe=merged-pr`, `in-develop`, `patch-upstream` are all recoverable elsewhere). It REPORTS; it
+never deletes. Never remove a worktree you did not create.
 
 ## Notes
 
